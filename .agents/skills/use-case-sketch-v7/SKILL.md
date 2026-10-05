@@ -1,5 +1,5 @@
 ---
-name: use-case-sketch
+name: use-case-sketch-v7
 description: Build a Clean Architecture use-case skeleton through conversation and incremental code edits, starting from selected ports rather than implementation scans. Use when the user wants Interactor, domain and outcome contracts to evolve in real files without concrete adapters or framework integration.
 ---
 
@@ -11,22 +11,19 @@ description: Build a Clean Architecture use-case skeleton through conversation a
 
 Establish the use case, selected port paths and target sketch directory; ask if unclear. For greenfield without ports, start from the user's requirements. Reuse confirmed decisions and already-loaded project instructions. Follow project task-tracking rules without inventing a new workflow.
 
-**Ownership check for every addition or change:** before adding or modifying a use case, reassess its context and domain responsibility from confirmed decisions, user answers and the approved read scope below. Recheck as behavior evolves during the sketch. Existing placement is a working decision, not proof that ownership remains correct. Reuse settled answers that still fit; ask only about gaps in the existing 1–3 question loop, not a separate DDD interview:
+**Boundary check before placement:** for every new use case, establish the following from confirmed decisions, user answers and the approved read scope below. Reuse settled answers; ask only about gaps, following the 1–3 question loop rather than starting a separate DDD interview:
 
-- What business responsibility does this operation serve, and which context/domain owner should hold it?
-- Do its terms, rules and model mean the same thing as in that owner's existing use cases? Matching names/fields alone are insufficient.
-- Who already owns the rules, authoritative data and state changes? Should this use case invoke/evolve that owner or request an operation through another owner's contract?
-- Does the confirmed change or evidence of misplaced behavior challenge the current name, responsibility or model boundary?
-
-If ownership still fits, state the reason briefly and proceed without reopening settled questions. If it does not, propose the smallest justified correction: relocate the use case/rule, evolve the existing model under section 3, or use the proper owner's contract. Show before/after responsibilities and locations, the requirement/evidence, and affected use cases/contracts/consumers. Obtain approval before changing existing ownership or consumers, and follow Relocation for file changes. Request narrow read permission when evidence lies outside scope; mark uncertain placement provisional rather than claiming it is wrong. Do not refactor for hypothetical future features.
+- What business responsibility does this operation serve?
+- Do its terms, rules and model mean the same thing as in the proposed owner's existing use cases? Matching names/fields alone are insufficient.
+- Who owns the rules, authoritative data and state changes? Does this use case change that state itself or request an operation through another owner's contract?
 
 For confirmed business defaults, creation rules and state transitions, clarify whether the rule applies only to this use case or across all creation/update channels. Distinguish creation invariants, transition rules and lifetime invariants. Reuse settled answers in the existing 1–3 question loop.
 
-A **Bounded Context** bounds a consistent domain language/model. Domain ownership identifies where its rules and state belong; it does not require an intermediate application grouping. A folder, use case, database or microservice does not automatically define a context. Consider existing owners before adding boundaries; a new use case does not automatically require a new context or domain model.
+A **Bounded Context** bounds a consistent domain language/model; a **module** groups code by responsibility. One context may contain several modules. A folder, use case, database or microservice does not automatically define a context. Consider existing owners before adding boundaries; do not invent a new context for every use case.
 
-Before creating files, show `proposed context → use case`, its domain rule owner(s), the target path using section 3, a one-sentence rationale and unresolved assumptions. This describes responsibility, not a required domain folder per use case. Obtain confirmation unless already agreed. If evidence is insufficient, label the boundary **provisional** and ask the user to approve that working placement; approval to proceed is not proof of the boundary. Keep this lightweight: no mandatory context map, glossary, events or extra design documents.
+Before creating files, show `proposed context → application module → use case`, the target path using the physical-layout decision in section 3, a one-sentence rationale and unresolved assumptions. Obtain confirmation unless already agreed. If evidence is insufficient, label the boundary **provisional** and ask the user to approve that working placement; approval to proceed is not proof of the boundary. Keep this lightweight: no mandatory context map, glossary, events or extra design documents.
 
-**Default read scope:** selected input/output/dependency interfaces, their directly required DTOs, outcomes/errors and type declarations. Read relevant sections only; do not recursively follow implementation imports. If paths are unknown, ask or offer a filename-only search within a named context/use-case directory, not a repository-wide content scan.
+**Default read scope:** selected input/output/dependency interfaces, their directly required DTOs, outcomes/errors and type declarations. Read relevant sections only; do not recursively follow implementation imports. If paths are unknown, ask or offer a filename-only search within a named module, not a repository-wide content scan.
 
 Read legacy Interactors, Entity/VO/policy method bodies, concrete adapters, routes, wiring or tests **only with explicit permission**. Explain which file/section is needed and why before expanding scope. Reading and editing the new sketch's own relevant files is allowed; that does not authorize scanning existing implementations. Keep the sketch separate from live integration unless requested.
 
@@ -36,36 +33,42 @@ Contracts are promises, not proof of current behavior. If preserving behavior re
 
 - Show the relevant Interactor fragment. Include the explicit input/output path in the first and final call trees; label deferred adapters, especially the Presenter. Label proposed behavior clearly; observed code is not automatically the desired behavior.
 - Ask **1–3 numbered questions** whose prerequisites are settled, then wait. Focus on decisions changing contracts or flow; look up facts within the approved read scope. Offer recommendations with reasons, not assumed approval.
-- Apply answers to contracts first, using section 1's ownership check as confirmed behavior evolves; for each confirmed behavior, follow the test-first loop in section 5 before adding its logic. Keep affected types, guarantees, callers and tests consistent within the approved scope. For existing shared-contract or model-ownership changes, show affected use cases and explain how their current models and write paths will coexist, delegate or be replaced. Request permission to inspect/update consumers before claiming compatibility. Reuse settled decisions in the existing question loop; do not introduce a separate design gate. Show only changed paths, a short diff/snippet, the test result and the next question. Show the full call tree only when useful or requested; avoid repeated prose specs.
+- Apply answers to contracts first; for each confirmed behavior, follow the test-first loop in section 5 before adding its logic. Keep affected types, guarantees, callers and tests consistent within the approved scope. For existing shared-contract or model-ownership changes, show affected use cases and explain how their current models and write paths will coexist, delegate or be replaced. Request permission to inspect/update consumers before claiming compatibility. Reuse settled decisions in the existing question loop; do not introduce a separate design gate. Show only changed paths, a short diff/snippet, the test result and the next question. Show the full call tree only when useful or requested; avoid repeated prose specs.
 - Mark unresolved behavior locally with `UNDECIDED: <question>`. Unimplemented executable paths must fail explicitly, such as `NotImplementedError`, rather than silently pass or return fake success. Interface method stubs are contracts, not missing behavior.
 
 Repeat until important branches are represented. Check them with short acceptance scenarios rather than restarting a separate discovery interview.
 
 ## 3. Keep the Clean Architecture shape
 
-**Physical layout:** this sketch convention places use cases directly under `application/use_cases/<use-case>/`, without an intermediate application capability/module group or command/query wrapper. Domain ownership is independent of that flat application layout. This is a navigation convention, not a Clean Architecture requirement.
+**Physical layout:** after agreeing context ownership, recommend retaining the existing layout if it communicates ownership sufficiently, or using context-first packaging to make the boundary visible. Explain the trade-off briefly and confirm the layout with the user as part of placement. Reuse an agreed layout unless new evidence warrants revisiting it; a context folder is optional, never generated for every module. For existing files, follow the Relocation rule below before changing paths.
 
-Confirm the target layout as part of placement. Existing project instructions and explicitly agreed layouts take precedence; propose migration rather than silently reorganizing live code. Approval to use this skill is not permission to move existing files. Follow Relocation for any migration, including imports, consumers and tests.
-
-A context-first example:
+Use conventions visible in approved context. These are alternatives, not two trees to scaffold; add only necessary files. A layer-first option:
 
 ```text
-<source-root>/contexts/<context>/
+<source-root>/
 ├── domain/<domain-owner>/
 │   └── entities / value_objects / policies
-└── application/
-    ├── <capability>_ports.py   # only for genuinely shared contracts
-    └── use_cases/<use-case>/
+└── application/modules/<module>/
+    ├── ports/
+    └── use_cases/<commands-or-queries>/<use-case>/
         ├── request.py
         ├── response.py
         ├── input_boundary.py
         ├── interactor.py
-        ├── ports.py           # only for use-case-specific dependencies
-        ├── errors.py          # only when needed
-        └── output_boundary.py # Presenter port; required in this sketch style
+        └── output_boundary.py  # Presenter port; required in this sketch style
 ```
 
-In a layer-first project, use the same `domain/<domain-owner>/` and `application/use_cases/<use-case>/` paths under the source root without the context-directory prefix. Preserve semantic context ownership even when it is not represented by a folder. These are alternatives, not two trees to scaffold; create only necessary files. A context is not necessarily a separate service. Do not generate empty adapter folders.
+A context-first option groups both domain and application inside the context:
+
+```text
+<source-root>/contexts/<context>/
+├── domain/<domain-owner>/
+└── application/modules/<module>/
+    ├── ports/
+    └── use_cases/<commands-or-queries>/<use-case>/
+```
+
+Use the same use-case files shown above. This is a packaging choice, not a requirement for a separate service. Do not generate empty adapter folders for either layout.
 
 Adapt extensions to the project language. Types may share files, but both Input Boundary and Output Boundary contracts are required. This skill chooses explicit Presenter ports as its convention; it is not the only valid Clean Architecture style.
 
@@ -87,7 +90,7 @@ Adapt extensions to the project language. Types may share files, but both Input 
 
   Clarify whether the proposed model is a read projection, a component, a replacement, or a collaborator in a coordinated operation. Multiple representations are allowed; avoid independently implementing the same business rule in competing write models or individual use cases. Prefer retaining the existing model when no confirmed behavior requires change; composition or replacement are alternatives, not automatic consolidation. Replacing a model does not authorize deleting it or migrating consumers without the existing confirmation and Relocation rules.
 
-  When confirmed behavior or ownership evidence challenges an existing model's name or responsibility, reassess its scope rather than preserving the original shape by default or creating a parallel owner. Recommend extending behavior, composing models, splitting responsibilities, or renaming/replacing the model according to confirmed invariants. Show the before/after responsibilities, affected use cases and contracts, and obtain approval before changing existing ownership or consumers.
+  When a confirmed new use case challenges an existing model's name or responsibility, reassess its scope rather than preserving the original shape by default or creating a parallel owner. Recommend extending behavior, composing models, splitting responsibilities, or renaming/replacing the model according to confirmed invariants. Show the before/after responsibilities, affected use cases and contracts, and obtain approval before changing existing ownership or consumers.
 
   Update approved callers, imports and tests together and run scoped regression checks. Reuse the existing question loop and Relocation rules; do not add a separate design stage or refactor for hypothetical future needs.
 
@@ -104,7 +107,7 @@ Adapt extensions to the project language. Types may share files, but both Input 
 - **Ports:** describe required capabilities, inputs/results, failure modes and guarantees. Include atomicity, ordering, concurrency, retries and partial effects where behavior requires them. A pre-check is not a uniqueness guarantee; a DB transaction cannot make remote effects atomic. Hide mechanisms behind small interfaces, not one port per table or method.
 - **Data:** keep request/result types separate from framework requests, ORM models and provider DTOs. Restrict sensitive data exposure.
 - **Output:** inject an application-owned Output Boundary into the Interactor. Define `present(result: UseCaseResult) -> None` (or outcome-specific methods) and make the Input Boundary's `execute` return `None`, or its async equivalent. Deliver success and expected rejection through that port, not a second returned result. For single-result use cases, emit one final outcome per normal execution and end the branch. A concrete Presenter will implement the port later; application code never imports it or receives its ViewModel. Keep display text, localization and transport status mapping outside the Interactor; send semantic codes and safe data.
-- **Ownership:** keep use-case-specific ports and types beside their Interactor. Put genuinely shared application contracts/policies in clearly named files under the owning context's application layer, such as `password_ports.py` or `login_token_policy.py`, only when confirmed consumers share their meaning and obligations. Shared business invariants remain with their domain owner, not in an application helper. Reuse alone does not justify merging contexts, duplicating rules or moving types into generic `shared`/`common` files. Domain ownership need not match the application folder name. Apply section 1's ownership check when sharing or placement changes; shared data types are not ports, and outcomes/errors are shared only when semantics and data genuinely match.
+- **Ownership:** use-case-specific types stay local; module ports belong in that module. When reuse crosses modules or new behavior challenges the agreed placement, revisit the boundary check using approved contracts/type declarations, not implementation scans. Recommend retaining ownership, relocating genuinely shared concepts or regrouping modules based on business meaning. Reuse alone does not justify merging contexts/modules or moving types into `shared`; domain ownership need not match the application folder name. Share outcomes/errors only when semantics and data genuinely match; shared data types are not ports.
 - **Cross-context contracts:** folders alone do not enforce boundaries. When multiple contexts interact, identify the specific public contracts allowed across the boundary, their exposed operations/data, authoritative owner and translation responsibility. Keep internal types/modules private rather than importing another context's Interactors or domain internals. An inward dependency port is not automatically a context's public API. Each context keeps its own model; exchange explicit contract data and translate where meanings differ. Any intentionally shared domain model requires explicit agreement on semantics and joint change ownership. A port does not imply HTTP, events or a separate service; production adapters remain deferred.
 - **Relocation:** show a short before/after tree, rationale and affected consumers; obtain approval before moving, renaming, merging or deleting existing files, including archived tests. Request narrow permission for consumer/import inspection beyond the current scope. Preserve behavior, update affected imports/tests together and run scoped regression checks before/after the change where available. For test reorganization, show an old-to-new mapping, preserve distinct behavioral cases and parameterized variants, and update test discovery as well as imports. Passing tests or equal test counts alone do not prove coverage was preserved. Treat pure relocation as a separate refactor, not a manufactured red/green cycle; report unverified compatibility if checks cannot run.
 
@@ -151,10 +154,10 @@ Before the first cycle, read [tdd](../tdd/SKILL.md) and its testing/mocking refe
 Follow the repository's agreed test layout. If none exists, propose:
 
 ```text
-tests/unit/contexts/<context>/test_<use_case>.py
+tests/unit/contexts/<context>/<module>/test_<use_case>.py
 ```
 
-Adapt to the language and approved context layout; omit context folders when the project does not use them. Keep domain-rule suites under a domain-owned path, such as `tests/unit/contexts/<context>/domain/`; no application capability-group directory is required. Existing tests move only under the Relocation rule.
+Adapt to the language and approved context layout; omit context folders when the project does not use them.
 
 - Organize tests by behavior and ownership, not development history. Avoid naming new suites `_tdd` or `_regression`; existing names alone do not authorize a rename.
 - Extend the owning use-case suite before creating another file. Split by behavior only when it improves navigation. Ask for narrow read/edit permission if that suite is outside the approved scope.
@@ -173,4 +176,4 @@ Trace each confirmed, locally owned business branch from the Interactor through 
 
 For overlapping write models, verify that rule ownership and model relationships are explicit, affected consumers within the approved scope follow the chosen design, and scoped regression checks cover their shared obligations. Report uninspected consumers and deferred persistence guarantees as unverified; unit tests do not prove atomic enforcement.
 
-Before final review, verify context/domain/type ownership fits the final confirmed behavior, not merely the original placement; approved ownership corrections and consumer updates are complete or explicitly deferred, and provisional assumptions remain visible. Verify the Interactor implements the Input Boundary, depends on and calls the Output Boundary on every expected terminal branch, and shows the deferred Presenter in the call tree. Ask for final review when important paths, invariants, port guarantees and error destinations are explicit, with no essential behavior hidden in placeholders. Report paths, verification and unresolved points concisely. Call it an **approved sketch**, not production-ready code, only after the user confirms; stop before adapter implementation. Leave incomplete sketches clearly identified when the user pauses.
+Before final review, verify context/module/type ownership matches the agreed placement and provisional assumptions remain visible, the Interactor implements the Input Boundary, depends on and calls the Output Boundary on every expected terminal branch, and shows the deferred Presenter in the call tree. Ask for final review when important paths, invariants, port guarantees and error destinations are explicit, with no essential behavior hidden in placeholders. Report paths, verification and unresolved points concisely. Call it an **approved sketch**, not production-ready code, only after the user confirms; stop before adapter implementation. Leave incomplete sketches clearly identified when the user pauses.
