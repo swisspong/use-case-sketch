@@ -29,14 +29,14 @@ from contexts.iam.application.modules.user_management.use_cases.change_user_stat
 from contexts.iam.application.modules.user_management.use_cases.change_user_status.response import (
     ChangeUserStatusFailure, ChangeUserStatusSuccess,
 )
-from contexts.iam.domain.identity.user_account import UserAccount, UserAccountTransition
+from contexts.iam.domain.identity.user_account import InvalidUserAccount, UserAccount, UserAccountTransition
 from contexts.iam.domain.identity.user_access_status import UserAccessStatus
 from contexts.iam.domain.identity.username import Username
 from contexts.iam.domain.identity.value_objects import Email
 
 
 class ChangeUserStatusTests(unittest.TestCase):
-    def snapshot(self, **overrides) -> UserAccount:
+    def snapshot(self, *, account_type=UserAccount, **overrides) -> UserAccount:
         values = dict(
             user_id="user-42", status=UserAccessStatus.ACTIVE, version=9,
             credential_generation=17, admin_eligible=False,
@@ -44,7 +44,7 @@ class ChangeUserStatusTests(unittest.TestCase):
             email=Email.from_input("alice@example.com"), password_hash="stored-hash",
         )
         values.update(overrides)
-        account = UserAccount.from_persisted(**values)
+        account = account_type.from_persisted(**values)
         self.assertIsInstance(account, UserAccount)
         return account
 
@@ -56,7 +56,8 @@ class ChangeUserStatusTests(unittest.TestCase):
         self.scope.__exit__.return_value = False
         self.uow.begin.return_value = self.scope
         self.account = self.snapshot()
-        self.tx.facts.return_value = StatusChangeFacts("admin-7", True, self.account)
+        self.actor = self.snapshot(user_id="admin-7", admin_eligible=True)
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, self.account)
         self.tx.commit.return_value = None
         self.output = create_autospec(ChangeUserStatusOutputBoundary, instance=True, spec_set=True)
         self.use_case: ChangeUserStatusInputBoundary = ChangeUserStatusInteractor(
@@ -67,7 +68,7 @@ class ChangeUserStatusTests(unittest.TestCase):
         def read_facts():
             self.scope.__enter__.assert_called_once_with()
             self.scope.__exit__.assert_not_called()
-            return StatusChangeFacts("admin-7", True, self.account)
+            return StatusChangeFacts("admin-7", self.actor, self.account)
 
         def commit_transition(*, transition):
             self.scope.__enter__.assert_called_once_with()
@@ -115,7 +116,7 @@ class ChangeUserStatusTests(unittest.TestCase):
         account = self.snapshot(
             status=UserAccessStatus.SUSPENDED, version=10, credential_generation=18,
         )
-        self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, account)
 
         returned = self.use_case.execute(
             ChangeUserStatusRequest("user-42", "active", expected_version=10),
@@ -155,7 +156,7 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.reset_mock()
                 self.output.reset_mock()
                 account = self.snapshot(status=before)
-                self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, account)
 
                 returned = self.use_case.execute(
                     ChangeUserStatusRequest("user-42", raw, expected_version=9),
@@ -173,13 +174,46 @@ class ChangeUserStatusTests(unittest.TestCase):
                     ChangeUserStatusSuccess("user-42", status, version=10),
                 )
 
+    def test_suspended_admin_is_forbidden_inside_scope_without_commit(self) -> None:
+        class ScopeBoundActor(UserAccount):
+            def administrative_eligibility(actor):
+                self.scope.__enter__.assert_called_once_with()
+                self.scope.__exit__.assert_not_called()
+                return super().administrative_eligibility()
+
+        actor = self.snapshot(
+            account_type=ScopeBoundActor, user_id="admin-7", admin_eligible=True,
+            status=UserAccessStatus.SUSPENDED,
+        )
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", actor, self.account)
+
+        def exit_scope(*args):
+            self.output.present.assert_not_called()
+            self.tx.commit.assert_not_called()
+            return False
+
+        self.scope.__exit__.side_effect = exit_scope
+
+        self.assertIsNone(self.use_case.execute(
+            ChangeUserStatusRequest("user-42", "suspended", expected_version=9),
+            actor_id="admin-7",
+        ))
+
+        self.uow.begin.assert_called_once_with(actor_id="admin-7", user_id="user-42")
+        self.tx.commit.assert_not_called()
+        self.scope.__exit__.assert_called_once_with(None, None, None)
+        self.output.present.assert_called_once_with(ChangeUserStatusFailure("forbidden"))
+        self.assertIs(self.account.status, UserAccessStatus.ACTIVE)
+        self.assertEqual(self.account.version, 9)
+
     def test_non_admin_is_forbidden_before_any_target_decision_without_commit(self) -> None:
         for target in (None, self.snapshot(admin_eligible=True), self.snapshot()):
             with self.subTest(target=target):
                 self.uow.reset_mock()
                 self.tx.reset_mock()
                 self.output.reset_mock()
-                self.tx.facts.return_value = StatusChangeFacts("ordinary-user-9", False, target)
+                actor = self.snapshot(user_id="ordinary-user-9", admin_eligible=False)
+                self.tx.facts.return_value = StatusChangeFacts("ordinary-user-9", actor, target)
 
                 returned = self.use_case.execute(
                     ChangeUserStatusRequest("user-42", "suspended", expected_version=0),
@@ -193,8 +227,28 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.commit.assert_not_called()
                 self.output.present.assert_called_once_with(ChangeUserStatusFailure("forbidden"))
 
+    def test_missing_actor_is_forbidden_before_any_target_decision_without_commit(self) -> None:
+        # Coverage of the now-implemented absent-actor branch, not a manufactured red.
+        for target in (None, self.snapshot(admin_eligible=True), self.account):
+            with self.subTest(target=target):
+                self.uow.reset_mock()
+                self.tx.reset_mock()
+                self.scope.reset_mock()
+                self.output.reset_mock()
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", None, target)
+
+                self.assertIsNone(self.use_case.execute(
+                    ChangeUserStatusRequest("user-42", "suspended", expected_version=9),
+                    actor_id="admin-7",
+                ))
+
+                self.uow.begin.assert_called_once_with(actor_id="admin-7", user_id="user-42")
+                self.tx.commit.assert_not_called()
+                self.scope.__exit__.assert_called_once_with(None, None, None)
+                self.output.present.assert_called_once_with(ChangeUserStatusFailure("forbidden"))
+
     def test_missing_target_is_not_found_without_commit(self) -> None:
-        self.tx.facts.return_value = StatusChangeFacts("admin-7", True, None)
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, None)
 
         returned = self.use_case.execute(
             ChangeUserStatusRequest("missing-user-81", "suspended", expected_version=9),
@@ -220,7 +274,8 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.reset_mock()
                 self.output.reset_mock()
                 account = self.snapshot(user_id=user_id, status=before_status, admin_eligible=True)
-                self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+                actor = account if user_id == "admin-7" else self.actor
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", actor, account)
 
                 returned = self.use_case.execute(
                     ChangeUserStatusRequest(user_id, status, expected_version),
@@ -230,8 +285,14 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.assertIsNone(returned)
                 self.uow.begin.assert_called_once_with(actor_id="admin-7", user_id=user_id)
                 self.tx.commit.assert_not_called()
+                # A suspended self-actor is denied before target protection;
+                # active actors still cannot change any admin target.
+                expected_code = (
+                    "forbidden" if user_id == "admin-7" and before_status is UserAccessStatus.SUSPENDED
+                    else "admin_target_forbidden"
+                )
                 self.output.present.assert_called_once_with(
-                    ChangeUserStatusFailure("admin_target_forbidden"),
+                    ChangeUserStatusFailure(expected_code),
                 )
                 self.assertEqual(account.version, 9)
                 self.assertEqual(account.credential_generation, 17)
@@ -243,7 +304,7 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.reset_mock()
                 self.output.reset_mock()
                 account = self.snapshot(status=status)
-                self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, account)
 
                 returned = self.use_case.execute(
                     ChangeUserStatusRequest("user-42", status, expected_version=8),
@@ -263,7 +324,7 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.reset_mock()
                 self.output.reset_mock()
                 account = self.snapshot(status=status)
-                self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, account)
 
                 returned = self.use_case.execute(
                     ChangeUserStatusRequest("user-42", status, expected_version=9),
@@ -277,7 +338,7 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.output.present.assert_called_once_with(ChangeUserStatusFailure("status_already_set"))
 
     def test_rejection_is_presented_only_after_successful_scope_exit(self) -> None:
-        self.tx.facts.return_value = StatusChangeFacts("admin-7", True, None)
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, None)
 
         def exit_scope(*args):
             self.output.present.assert_not_called()
@@ -296,9 +357,10 @@ class ChangeUserStatusTests(unittest.TestCase):
     def test_malformed_or_wrong_identity_facts_stop_before_commit_and_presentation(self) -> None:
         for facts in (
             object(),
-            StatusChangeFacts("other-actor-99", True, self.account),
-            StatusChangeFacts("admin-7", True, self.snapshot(user_id="different-user-99")),
-            StatusChangeFacts("admin-7", True, object()),
+            StatusChangeFacts("other-actor-99", self.actor, self.account),
+            StatusChangeFacts("admin-7", self.actor, self.snapshot(user_id="different-user-99")),
+            StatusChangeFacts("admin-7", self.actor, object()),
+            StatusChangeFacts("admin-7", self.snapshot(user_id="other-admin-99", admin_eligible=True), self.account),
         ):
             with self.subTest(facts=facts):
                 self.uow.reset_mock()
@@ -316,14 +378,15 @@ class ChangeUserStatusTests(unittest.TestCase):
                 self.tx.commit.assert_not_called()
                 self.output.present.assert_not_called()
 
-    def test_malformed_authoritative_eligibility_is_a_system_failure_not_a_denial(self) -> None:
-        for eligibility in (1, "true", None):
-            with self.subTest(eligibility=eligibility):
+    def test_malformed_authoritative_actor_is_a_system_failure_not_a_denial(self) -> None:
+        # None now means a missing actor; malformed/leaked Entity results remain errors.
+        for actor in (1, "true", True, InvalidUserAccount("status")):
+            with self.subTest(actor=actor):
                 self.tx.reset_mock()
                 self.output.reset_mock()
-                self.tx.facts.return_value = StatusChangeFacts("admin-7", eligibility, self.account)
+                self.tx.facts.return_value = StatusChangeFacts("admin-7", actor, self.account)
 
-                with self.assertRaises(UserStatusManagementError):
+                with self.assertRaises(InvalidUserStatusChangeResult):
                     self.use_case.execute(
                         ChangeUserStatusRequest("user-42", "suspended", expected_version=9),
                         actor_id="admin-7",
@@ -411,7 +474,7 @@ class ChangeUserStatusTests(unittest.TestCase):
 
     def test_nonblank_identity_is_preserved_and_zero_revision_is_valid(self) -> None:
         account = self.snapshot(user_id=" user-42 ", version=0)
-        self.tx.facts.return_value = StatusChangeFacts("admin-7", True, account)
+        self.tx.facts.return_value = StatusChangeFacts("admin-7", self.actor, account)
 
         returned = self.use_case.execute(
             ChangeUserStatusRequest(" user-42 ", "suspended", expected_version=0),

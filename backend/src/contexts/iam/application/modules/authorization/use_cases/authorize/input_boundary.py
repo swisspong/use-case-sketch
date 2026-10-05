@@ -19,7 +19,9 @@ class AuthorizeInputBoundary(Protocol):
         it never reads account eligibility or grants permission. Supply those
         facts and the unchanged token to AccessAccountStore.protect. Inside its
         protected scope the Interactor calls UserAccount.credential_eligibility,
-        then branches on current admin eligibility and the trusted requirement.
+        then invokes UserAccount.administrative_eligibility for ADMIN requests.
+        This is the same ACTIVE-admin rule used by every administrative operation;
+        the trusted requirement is never a client claim.
         Missing/malformed claimed generation is None and denied by the Entity;
         never substitute the current account generation. Missing account or
         invalid credential/account state emits unauthenticated. Eligible non-admins

@@ -5,7 +5,7 @@ Caller / Controller [deferred] -> AuthorizeInputBoundary -> AuthorizeInteractor
   -> AccessAccountStore.protect(credential, unchanged token) [adapter deferred]
      -> protected authoritative UserAccount / None
      -> UserAccount.credential_eligibility(original credential generation) -> branch
-     -> allowed: current account admin eligibility / trusted access requirement
+     -> allowed ADMIN request: UserAccount.administrative_eligibility -> branch
   -> successful scope exit (no implicit commit; never suppress errors)
   -> AuthorizeOutputBoundary.present -> Presenter -> ViewModel / transport [deferred]
 Technical credential rejection, missing account or domain credential denial ->
@@ -16,7 +16,9 @@ outcome/retry. Resource-specific authorization and atomic mutations belong to th
 owning use cases. Actual protection/freshness/barrier enforcement remains deferred.
 """
 
-from contexts.iam.domain.identity.user_account import CredentialEligibility, UserAccount
+from contexts.iam.domain.identity.user_account import (
+    AdministrativeEligibility, CredentialEligibility, UserAccount,
+)
 
 from ...ports import (
     AccessAccountStore, AccessValidator, UnauthenticatedAccess, VerifiedCredential,
@@ -71,8 +73,14 @@ class AuthorizeInteractor(AuthorizeInputBoundary):
                 if decision is CredentialEligibility.DENIED:
                     outcome = AuthorizeFailure(code="unauthenticated")
                 elif decision is CredentialEligibility.ALLOWED:
-                    if requirement is AccessRequirement.ADMIN and not account.admin_eligible:
-                        outcome = AuthorizeFailure(code="forbidden")
+                    if requirement is AccessRequirement.ADMIN:
+                        admin_eligibility = account.administrative_eligibility()
+                        if admin_eligibility is AdministrativeEligibility.DENIED:
+                            outcome = AuthorizeFailure(code="forbidden")
+                        elif admin_eligibility is AdministrativeEligibility.ALLOWED:
+                            outcome = AuthorizeSuccess(actor_id=account.user_id)
+                        else:
+                            raise InvalidAccessValidationResult("Undeclared account administrative decision")
                     else:
                         outcome = AuthorizeSuccess(actor_id=account.user_id)
                 else:

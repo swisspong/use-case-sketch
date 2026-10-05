@@ -7,15 +7,17 @@ Caller / Controller [deferred] -> AdminLoginInputBoundary -> AdminLoginInteracto
   -> PasswordVerifier.verify / verify_missing [adapter deferred]
   -> LoginGrantStore.protect(verified identity) [adapter deferred]
      -> protected current UserAccount / None
+     -> UserAccount.administrative_eligibility(current ACTIVE admin) -> branch
      -> UserAccount.credential_eligibility(original lookup generation) -> branch
      -> allowed: TokenIssuer.issue(identity, original generation, TTL) [adapter deferred]
   -> successful scope exit (no implicit commit; never suppress errors)
   -> AdminLoginOutputBoundary.present -> Presenter -> ViewModel / transport [deferred]
 Missing/non-admin/inactive lookup, password mismatch or current credential denial
 -> invalid_credentials -> output once. Scoped decisions present after exit only.
-Admin eligibility remains the authoritative lookup snapshot guarantee, not client
-roles or a new atomic issuance-role requirement. Later resource authorization
-reads current eligibility. Lookup guards -> InvalidLoginAccountResult / TypeError;
+Lookup approval is preliminary. The Entity's shared ACTIVE-admin rule executes
+again inside the issuance scope; role revocation serializes with issuance even
+without a generation change. Later resource authorization also checks current
+eligibility. Lookup guards -> InvalidLoginAccountResult / TypeError;
 scope guards -> InvalidLoginGrantResult; verifier/issuer guards ->
 InvalidPasswordVerificationResult / InvalidTokenIssuanceResult. These, adapter-translated
 AccountLookupError / PasswordVerificationError / LoginGrantError / TokenIssuanceError
@@ -27,7 +29,8 @@ protection, expiry/barriers, rate-limiting, MFA and resource authorization defer
 
 from contexts.iam.domain.identity.username import InvalidUsernameValue, Username
 from contexts.iam.domain.identity.user_account import (
-    CredentialEligibility, InvalidUserAccount, LoginEligibility, UserAccount,
+    AdministrativeEligibility, CredentialEligibility, InvalidUserAccount,
+    LoginEligibility, UserAccount,
 )
 
 from contexts.iam.application.modules.credentials.ports import (
@@ -97,22 +100,28 @@ class AdminLoginInteractor(AdminLoginInputBoundary):
             else:
                 if not isinstance(current, UserAccount) or current.user_id != account.user_id:
                     raise InvalidLoginGrantResult("Scope returned invalid or mismatched account facts")
-                grant_eligibility = current.credential_eligibility(
-                    generation=account.credential_generation,
-                )
-                if grant_eligibility is CredentialEligibility.DENIED:
+                admin_eligibility = current.administrative_eligibility()
+                if admin_eligibility is AdministrativeEligibility.DENIED:
                     outcome = AdminLoginFailure(code="invalid_credentials")
-                elif grant_eligibility is CredentialEligibility.ALLOWED:
-                    issued = self._tokens.issue(
-                        user_id=account.user_id,
-                        credential_generation=account.credential_generation,
-                        ttl=LOGIN_ACCESS_TOKEN_TTL,
+                elif admin_eligibility is AdministrativeEligibility.ALLOWED:
+                    grant_eligibility = current.credential_eligibility(
+                        generation=account.credential_generation,
                     )
-                    if not isinstance(issued, IssuedToken):
-                        raise InvalidTokenIssuanceResult("Token issuer returned an undeclared result")
-                    if not isinstance(issued.token, str) or not issued.token:
-                        raise InvalidTokenIssuanceResult("Token issuer returned invalid token data")
-                    outcome = AdminLoginSuccess(token=issued.token)
+                    if grant_eligibility is CredentialEligibility.DENIED:
+                        outcome = AdminLoginFailure(code="invalid_credentials")
+                    elif grant_eligibility is CredentialEligibility.ALLOWED:
+                        issued = self._tokens.issue(
+                            user_id=account.user_id,
+                            credential_generation=account.credential_generation,
+                            ttl=LOGIN_ACCESS_TOKEN_TTL,
+                        )
+                        if not isinstance(issued, IssuedToken):
+                            raise InvalidTokenIssuanceResult("Token issuer returned an undeclared result")
+                        if not isinstance(issued.token, str) or not issued.token:
+                            raise InvalidTokenIssuanceResult("Token issuer returned invalid token data")
+                        outcome = AdminLoginSuccess(token=issued.token)
+                    else:
+                        raise InvalidLoginGrantResult("Undeclared account credential decision")
                 else:
-                    raise InvalidLoginGrantResult("Undeclared account credential decision")
+                    raise InvalidLoginGrantResult("Undeclared account administrative decision")
         self._output.present(outcome)

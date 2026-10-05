@@ -140,7 +140,7 @@ class IdentityStatusPolicyTests(unittest.TestCase):
                 status=status, expected_version=expected_version,
             ), AccountAccessRejection),
             ("authorized_policy", IdentityStatusPolicy.decide(
-                actor_admin_eligible=True, target=target,
+                actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=target,
                 status=status, expected_version=expected_version,
             ), IdentityStatusRejection),
         )
@@ -254,12 +254,12 @@ class IdentityStatusPolicyTests(unittest.TestCase):
         self.assertIs(rotation.after.credential_eligibility(generation=17), CredentialEligibility.DENIED)
         self.assertIs(rotation.after.credential_eligibility(generation=18), CredentialEligibility.ALLOWED)
         stale = IdentityStatusPolicy.decide(
-            actor_admin_eligible=True, target=rotation.after,
+            actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=rotation.after,
             status=UserAccessStatus.SUSPENDED, expected_version=9,
         )
         self.assertIs(stale, IdentityStatusRejection.VERSION_CONFLICT)
         suspension = IdentityStatusPolicy.decide(
-            actor_admin_eligible=True, target=rotation.after,
+            actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=rotation.after,
             status=UserAccessStatus.SUSPENDED, expected_version=10,
         )
         self.assertIsInstance(suspension, AccountAccessTransition)
@@ -268,7 +268,7 @@ class IdentityStatusPolicyTests(unittest.TestCase):
         self.assertEqual(suspension.after.password_hash, "new-private-hash")
         self.assertIs(suspension.after.credential_eligibility(generation=19), CredentialEligibility.DENIED)
         restoration = IdentityStatusPolicy.decide(
-            actor_admin_eligible=True, target=suspension.after,
+            actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=suspension.after,
             status=UserAccessStatus.ACTIVE, expected_version=11,
         )
         self.assertIsInstance(restoration, AccountAccessTransition)
@@ -366,7 +366,7 @@ class IdentityStatusPolicyTests(unittest.TestCase):
         for target in (None, self.snapshot(admin_eligible=True), self.snapshot()):
             with self.subTest(target=target):
                 result = IdentityStatusPolicy.decide(
-                    actor_admin_eligible=False, target=target,
+                    actor=self.snapshot(user_id="ordinary-user-9", admin_eligible=False), target=target,
                     status=UserAccessStatus.SUSPENDED, expected_version=0,
                 )
 
@@ -374,7 +374,7 @@ class IdentityStatusPolicyTests(unittest.TestCase):
 
     def test_admin_receives_missing_target_decision(self) -> None:
         result = IdentityStatusPolicy.decide(
-            actor_admin_eligible=True, target=None,
+            actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=None,
             status=UserAccessStatus.SUSPENDED, expected_version=9,
         )
 
@@ -479,15 +479,16 @@ class IdentityStatusPolicyTests(unittest.TestCase):
 
     def test_malformed_trusted_policy_facts_are_system_failures_not_access_decisions(self) -> None:
         for field, value in (
-            ("actor_admin_eligible", 1), ("actor_admin_eligible", "true"),
-            ("actor_admin_eligible", None), ("status", "suspended"),
+            ("actor", 1), ("actor", "true"),
+            ("actor", True), ("actor", InvalidAccountAccess("status")),
+            ("status", "suspended"),
             ("status", None), ("expected_version", True),
             ("expected_version", -1), ("expected_version", "9"),
             ("target", object()),
         ):
             with self.subTest(field=field, value=value):
                 facts = dict(
-                    actor_admin_eligible=True, target=self.snapshot(),
+                    actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=self.snapshot(),
                     status=UserAccessStatus.SUSPENDED, expected_version=9,
                 )
                 facts[field] = value
@@ -506,7 +507,7 @@ class IdentityStatusPolicyTests(unittest.TestCase):
         # Existing immutable domain types, tested through public construction paths.
         target = self.snapshot()
         transition = IdentityStatusPolicy.decide(
-            actor_admin_eligible=True, target=target,
+            actor=self.snapshot(user_id="admin-7", admin_eligible=True), target=target,
             status=UserAccessStatus.SUSPENDED, expected_version=9,
         )
         self.assertIsInstance(transition, AccountAccessTransition)

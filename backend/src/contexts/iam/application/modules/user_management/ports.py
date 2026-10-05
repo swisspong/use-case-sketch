@@ -25,17 +25,20 @@ class UserStatusManagementError(RuntimeError):
 
 @dataclass(frozen=True)
 class StatusChangeFacts:
-    """Authoritative actor eligibility and target Entity, not a second write model.
+    """Authoritative actor/target Entities, not another independently writable model.
 
-    actor_id binds the eligibility fact to the trusted caller. Eligibility is an
-    exact bool; a missing actor is ineligible. target is the exact requested
-    UserAccount or None. Rehydrate with from_persisted, never creation defaults.
-    Use these facts only inside their producing scope, before explicit commit;
-    never reuse a committed/closed scope or upgrade a stale snapshot.
+    actor_id binds the scope to the trusted caller; actor is that exact UserAccount
+    or None if missing. Return suspended/non-admin actors too: the Entity and policy
+    own the shared ACTIVE-admin rule, not an adapter-derived eligibility boolean.
+    target is the exact requested UserAccount or None. Rehydrate both Entities with
+    from_persisted, never creation defaults. Use these facts only inside their
+    producing scope, before explicit commit; never reuse a committed/closed scope
+    or upgrade a stale snapshot. A matching actor/target identity uses consistent
+    authoritative state, not divergent snapshots.
     """
 
     actor_id: str
-    actor_admin_eligible: bool
+    actor: UserAccount | None
     target: UserAccount | None
 
 
@@ -43,9 +46,11 @@ class StatusChangeTransaction(Protocol):
     def facts(self) -> StatusChangeFacts:
         """Read one consistent authoritative actor/target snapshot for this scope.
 
-        No mutation, credential change or provider effect. Preserve recorded
-        username/email/hash/status/revision/generation/admin eligibility; do not
-        normalize corrupt persisted data. Bind both identities to begin's exact
+        No mutation, credential change or provider effect. Return full actor and
+        target Entities, including ineligible actors; never compute permissions.
+        Preserve recorded username/email/hash/status/revision/generation/admin
+        eligibility for both accounts; do not normalize corrupt persisted data.
+        Bind both identities to begin's exact
         arguments. InvalidUserAccount or recognized read/corruption failures ->
         adapter -> UserStatusManagementError -> outer handler without commit,
         outcome or retry. Malformed/mismatched facts -> Interactor ->
@@ -94,8 +99,10 @@ class StatusChangeUoW(Protocol):
         actor_id is authenticated caller context, never a client-supplied role.
         IdentityStatusPolicy and UserAccount decisions run in the Interactor while
         this scope protects authoritative actor/target eligibility and account state
-        through evaluation and commit (or no-commit exit). Concurrent role
-        revocation, target-role changes, password rotation and status updates must
+        through evaluation and commit (or no-commit exit). This includes the actor's
+        ACTIVE status and admin eligibility, even when generation is unchanged.
+        Concurrent role revocation, target-role changes, password rotation and
+        status updates must
         serialize with this operation. Coordinate consistent lock ordering or
         equivalent protection across ALL account writers. A separate permissive
         pre-check or stale unconditional write is insufficient. Role changes must

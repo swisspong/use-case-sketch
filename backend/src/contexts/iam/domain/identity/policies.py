@@ -3,8 +3,8 @@
 from enum import Enum
 
 from .user_account import (
-    UserAccount, AccountAccessRejection, UserAccountTransition,
-    InvalidAccountAccessChange,
+    AdministrativeEligibility, UserAccount, AccountAccessRejection,
+    UserAccountTransition, InvalidAccountAccessChange,
 )
 from .user_access_status import UserAccessStatus
 
@@ -27,14 +27,15 @@ class InvalidIdentityStatusFacts(RuntimeError):
 class IdentityStatusPolicy:
     @staticmethod
     def decide(
-        *, actor_admin_eligible: bool, target: UserAccount | None,
+        *, actor: UserAccount | None, target: UserAccount | None,
         status: UserAccessStatus, expected_version: int,
     ) -> IdentityStatusDecision:
         """Authorize the actor before asking the Entity for a transition.
 
-        The administrative operation requires current admin eligibility before
-        disclosing any target decision. Other channels' actor permissions are not
-        established here; UserAccount owns shared target/transition invariants.
+        The administrative operation requires UserAccount's shared ACTIVE-admin
+        approval from the current actor before disclosing any target decision.
+        Missing/suspended/non-admin actors receive ADMIN_REQUIRED. UserAccount owns
+        this rule across all administrative operations and the target invariants.
         This policy performs no I/O. Facts, decision, persistence and access-barrier
         enforcement must share one protected atomic scope; do not use a permissive
         pre-check followed by unconditional writing. The orchestrating caller invokes
@@ -44,14 +45,19 @@ class IdentityStatusPolicy:
         system exception. They never become an authorization grant or rejection.
         """
         if (
-            type(actor_admin_eligible) is not bool
+            (actor is not None and not isinstance(actor, UserAccount))
             or not isinstance(status, UserAccessStatus)
             or type(expected_version) is not int
             or expected_version < 0
         ):
             raise InvalidIdentityStatusFacts("Malformed trusted status-change arguments")
-        if not actor_admin_eligible:
+        if actor is None:
             return IdentityStatusRejection.ADMIN_REQUIRED
+        eligibility = actor.administrative_eligibility()
+        if eligibility is AdministrativeEligibility.DENIED:
+            return IdentityStatusRejection.ADMIN_REQUIRED
+        if eligibility is not AdministrativeEligibility.ALLOWED:
+            raise InvalidIdentityStatusFacts("Entity returned an undeclared administrative decision")
         if target is None:
             return IdentityStatusRejection.USER_NOT_FOUND
         if not isinstance(target, UserAccount):

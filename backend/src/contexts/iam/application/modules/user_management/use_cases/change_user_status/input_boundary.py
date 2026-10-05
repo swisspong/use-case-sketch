@@ -11,8 +11,11 @@ class ChangeUserStatusInputBoundary(Protocol):
         Invalid user_id/status/version emits invalid_user_id/invalid_status/
         invalid_version before dependency calls, with no normalization or coercion.
         Open StatusChangeUoW for the trusted actor and exact target. The Interactor
-        calls IdentityStatusPolicy using protected authoritative facts; the policy
-        delegates target invariants/transitions to the UserAccount Entity.
+        calls IdentityStatusPolicy using protected authoritative actor/target
+        Entities. The actor must satisfy UserAccount's shared ACTIVE-admin rule;
+        missing, suspended or non-admin actors emit forbidden without a commit or
+        target disclosure. This rule applies to every administrative operation.
+        The policy delegates target invariants/transitions to the UserAccount Entity.
         Every Identity access-update channel honors those same Entity invariants.
         Adapters obtain facts/persist/enforce atomicity, never execute the policy or
         map domain rejections. Commit only an approved transition, once; rejections

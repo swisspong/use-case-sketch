@@ -123,6 +123,10 @@ def test_protected_facts_are_decided_inside_scope_and_presented_after_exit(
             assert protected, "Account decision escaped the protected scope"
             return super().credential_eligibility(generation=generation)
 
+        def administrative_eligibility(self):
+            assert protected, "Admin decision escaped the protected scope"
+            return super().administrative_eligibility()
+
     account = account_facts(account_type=ScopeBoundAccount)
 
     def enter():

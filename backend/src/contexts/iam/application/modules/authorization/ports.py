@@ -92,7 +92,9 @@ class AccessAccountStore(Protocol):
         including suspended/non-admin accounts and stale-generation accounts.
         Rehydrate with from_persisted, preserving state, not creation defaults.
         The Interactor invokes credential_eligibility with the ORIGINAL credential
-        generation, branches, then checks current admin_eligible when required.
+        generation, branches, then invokes administrative_eligibility when ADMIN
+        is required. The Entity owns the shared ACTIVE-admin rule; do not execute
+        it in an adapter or substitute token role claims.
         Adapters must NOT call domain eligibility or filter these business facts.
 
         Protect all mutable facts used by the decision, including credential

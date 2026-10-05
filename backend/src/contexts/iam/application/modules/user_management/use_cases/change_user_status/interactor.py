@@ -12,7 +12,8 @@ Caller / Controller [deferred] supplies trusted actor_id
      -> ChangeUserStatusOutputBoundary.present
         -> Presenter -> ViewModel / transport output [deferred]
 The Interactor calls the real domain policy inside the protected actor/target
-scope and maps domain decisions directly. Identity owns shared target invariants,
+scope and maps domain decisions directly. The actor Entity must satisfy the shared
+ACTIVE-admin rule before any target decision. Identity owns shared target invariants,
 revision and credential generation; adapters only obtain facts/persist/enforce.
 Known dependency failures -> adapters -> UserStatusManagementError -> outer handler
 [deferred]. InvalidIdentityStatusFacts -> Interactor -> UserStatusManagementError;
@@ -63,6 +64,13 @@ class ChangeUserStatusInteractor(ChangeUserStatusInputBoundary):
                 not isinstance(facts, StatusChangeFacts)
                 or facts.actor_id != actor_id
                 or (
+                    facts.actor is not None
+                    and (
+                        not isinstance(facts.actor, UserAccount)
+                        or facts.actor.user_id != actor_id
+                    )
+                )
+                or (
                     facts.target is not None
                     and (
                         not isinstance(facts.target, UserAccount)
@@ -73,7 +81,7 @@ class ChangeUserStatusInteractor(ChangeUserStatusInputBoundary):
                 raise InvalidUserStatusChangeResult("Transaction returned malformed or mismatched facts")
             try:
                 decision = IdentityStatusPolicy.decide(
-                    actor_admin_eligible=facts.actor_admin_eligible, target=facts.target,
+                    actor=facts.actor, target=facts.target,
                     status=status, expected_version=request.expected_version,
                 )
             except InvalidIdentityStatusFacts as exc:

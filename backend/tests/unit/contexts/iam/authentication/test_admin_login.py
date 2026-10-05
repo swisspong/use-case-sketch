@@ -86,6 +86,53 @@ class AdminLoginTests(unittest.TestCase):
         )
         self.passwords.verify_missing.assert_not_called()
 
+    def test_revoked_admin_role_with_same_generation_rejects_after_protected_exit(self) -> None:
+        protected = False
+        exited = False
+
+        class ScopeBoundAccount(UserAccount):
+            def administrative_eligibility(account):
+                self.assertTrue(protected, "Admin decision escaped the protected scope")
+                return super().administrative_eligibility()
+
+        current = ScopeBoundAccount.from_persisted(
+            user_id="user-42", username=Username.from_input("rootops"),
+            email=Email.from_input("rootops@example.com"), password_hash="stored-admin-hash",
+            status=UserAccessStatus.ACTIVE, admin_eligible=False,
+            version=43, credential_generation=41,
+        )
+        self.assertIsInstance(current, UserAccount)
+
+        def enter():
+            nonlocal protected
+            protected = True
+            return current
+
+        def exit_scope(*args):
+            nonlocal protected, exited
+            self.output.present.assert_not_called()
+            protected = False
+            exited = True
+            return False
+
+        def present(outcome):
+            self.assertTrue(exited)
+            self.assertFalse(protected)
+
+        self.scope.__enter__.side_effect = enter
+        self.scope.__exit__.side_effect = exit_scope
+        self.output.present.side_effect = present
+
+        self.assertIsNone(self.input.execute(self.request))
+
+        self.accounts.find_admin_by_username.assert_called_once_with("rootops")
+        self.passwords.verify.assert_called_once_with(
+            "Private Admin Password!", "stored-admin-hash",
+        )
+        self.grants.protect.assert_called_once_with(user_id="user-42")
+        self.tokens.issue.assert_not_called()
+        self.output.present.assert_called_once_with(AdminLoginFailure("invalid_credentials"))
+
     def test_missing_or_non_admin_lookup_rejects_without_issuing_a_token(self) -> None:
         self.accounts.find_admin_by_username.return_value = None
 

@@ -44,6 +44,11 @@ class LoginEligibility(str, Enum):
     DENIED = "denied"
 
 
+class AdministrativeEligibility(str, Enum):
+    ALLOWED = "allowed"
+    DENIED = "denied"
+
+
 class CredentialEligibility(str, Enum):
     ALLOWED = "allowed"
     DENIED = "denied"
@@ -145,6 +150,16 @@ class UserAccount:
             return InvalidRegistrationValue("invalid_password")
         return password
 
+    def administrative_eligibility(self) -> AdministrativeEligibility:
+        """Shared ACTIVE-admin rule for ALL administrative operations.
+
+        Callers protect the current account facts through the operation's effects;
+        this decision alone is not a later mutation or issuance grant.
+        """
+        if self.status is not UserAccessStatus.ACTIVE or not self.admin_eligible:
+            return AdministrativeEligibility.DENIED
+        return AdministrativeEligibility.ALLOWED
+
     def login_eligibility(self, *, admin_required: bool) -> LoginEligibility:
         """Account-only login eligibility; the caller still verifies the password.
 
@@ -157,9 +172,14 @@ class UserAccount:
         """
         if type(admin_required) is not bool:
             raise InvalidAccountDecisionFacts("Malformed trusted login requirement")
+        if admin_required:
+            eligibility = self.administrative_eligibility()
+            if eligibility is AdministrativeEligibility.DENIED:
+                return LoginEligibility.DENIED
+            if eligibility is AdministrativeEligibility.ALLOWED:
+                return LoginEligibility.ALLOWED
+            raise InvalidAccountDecisionFacts("Undeclared account administrative decision")
         if self.status is not UserAccessStatus.ACTIVE:
-            return LoginEligibility.DENIED
-        if admin_required and not self.admin_eligible:
             return LoginEligibility.DENIED
         return LoginEligibility.ALLOWED
 

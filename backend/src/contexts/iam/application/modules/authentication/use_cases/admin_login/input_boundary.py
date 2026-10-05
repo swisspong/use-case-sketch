@@ -10,12 +10,13 @@ class AdminLoginInputBoundary(Protocol):
         Lookup returns full UserAccount facts, including non-admin/suspended users;
         the Interactor calls login_eligibility(admin_required=True). Invalid username,
         missing/ineligible account or password mismatch -> invalid_credentials.
-        Missing/ineligible lookup uses dummy password verification. Admin eligibility
-        is the authoritative lookup snapshot guarantee, not a client role or an
-        atomic issuance-role check; resource authorization reads current eligibility.
+        Missing/ineligible lookup uses dummy password verification. Lookup approval
+        is preliminary, never a client role or an issuance grant.
         After password verification, protect current account facts through the
-        Interactor's credential_eligibility using the ORIGINAL lookup generation
-        and technical token issuance. Missing/current denial -> invalid_credentials
+        Interactor's administrative_eligibility (ACTIVE admin), credential_eligibility
+        using the ORIGINAL lookup generation and technical token issuance.
+        Role revocation must serialize with issuance even without a generation
+        change. Missing/current denial -> invalid_credentials
         before issuance. Never upgrade snapshots, retry rejection or delegate local
         eligibility decisions to adapters. TTL is the shared application-selected
         15 minutes, not request input or an independent adapter default.

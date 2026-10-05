@@ -71,9 +71,10 @@ class AdminLoginAccountStore(Protocol):
         Leaked factory rejection/mismatched username -> Interactor ->
         InvalidLoginAccountResult; undeclared result -> TypeError -> outer handler
         before verification/issuance/presentation. Unexpected errors propagate.
-        Admin eligibility remains the lookup snapshot guarantee; subsequent
-        authorization checks current eligibility. Atomic issuance role checks are
-        not established. Production adapters and snapshot tests deferred.
+        Lookup approval is preliminary: admin_login must recheck the Entity's
+        ACTIVE-admin rule inside LoginGrantStore's protected issuance scope.
+        Subsequent authorization also checks current eligibility. Production
+        adapters and snapshot/protection tests remain deferred.
         """
         ...
 
@@ -94,7 +95,8 @@ class LoginGrantStore(Protocol):
         Entry yields the full current authoritative UserAccount for that identity,
         or None if missing. Rehydrate recorded state, never creation defaults.
         The Interactor invokes credential_eligibility using the ORIGINAL lookup
-        generation, branches on the decision and calls TokenIssuer only if allowed.
+        generation. For admin_login it also invokes administrative_eligibility on
+        this current Entity. TokenIssuer is called only if all decisions allow it.
         Never execute eligibility here, replace the supplied generation, upgrade
         an old login snapshot or select business defaults in an adapter.
 
@@ -102,10 +104,11 @@ class LoginGrantStore(Protocol):
         serialize with ALL account/status/credential writers and their suspension
         barriers, using consistent lock ordering or equivalent protection. A stale
         read or permissive pre-check followed by unconditional signing is not enough.
-        Admin role at issuance is intentionally not a new business requirement:
-        admin_login keeps its lookup-snapshot guarantee; resource authorization
-        must read current eligibility. Neither this scope nor a DB transaction
-        alone makes remote signing/provider effects atomic.
+        For admin_login, protect current ACTIVE status AND admin eligibility
+        through issuance and exit, serializing with role revocation even if it
+        leaves credential generation unchanged. Ordinary login does not require
+        admin eligibility. Neither this scope nor a DB transaction alone makes
+        remote signing/provider effects atomic.
 
         Scope-owned operations only read/protect facts: no account/credential/provider
         writes, no explicit or implicit commit. Exit releases protection on every
