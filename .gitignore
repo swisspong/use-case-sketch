@@ -35,6 +35,9 @@ pip-wheel-metadata/
 # Notebook checkpoints
 .ipynb_checkpoints/
 
+# Sensitive local PDF extraction output
+/backend/local-documents/
+
 # Local environment settings and secrets (keep example templates)
 .env
 .env.*

@@ -26,6 +26,8 @@ class ExtractPdfTextInputBoundary(Protocol):
         use case does not import IAM internals or treat caller claims as grants.
         One final outcome per normal execution, after storage acknowledgement.
         Declared system failures propagate unless recovery is explicitly supported.
-        Production adapters, preset management and Presenter remain deferred.
+        Local CLI composes a real parser/store/JSON Presenter and an explicitly
+        unavailable vision fallback. Remote vision, admin preset editing and
+        authenticated API integration remain deferred.
         """
         ...

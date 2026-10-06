@@ -1,4 +1,4 @@
-from contexts.document_processing.domain.documents.extraction import DocumentExtraction
+from ....domain.documents.extraction import DocumentExtraction
 
 from .configuration import ExtractionConfig, UnknownVisionPreset
 from .errors import (

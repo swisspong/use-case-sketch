@@ -1,0 +1,11 @@
+{
+  "presets": [
+    {
+      "name": "local-offline",
+      "endpoint": "https://vision.example/v1",
+      "model": "not-configured"
+    }
+  ],
+  "unreadable_threshold_percent": 0,
+  "suspicious_threshold_percent": 0
+}

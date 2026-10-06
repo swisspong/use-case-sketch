@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, Union
 
-from contexts.document_processing.domain.documents.extraction import (
+from ....domain.documents.extraction import (
     DocumentExtraction,
     SourcePage,
 )
@@ -35,7 +35,8 @@ class PdfTextExtractor(Protocol):
         no persistence/presentation/retry. Unexpected errors propagate.
         Malformed/undeclared trusted facts -> Interactor ->
         InvalidPdfExtractionResult -> outer handler without downstream effects.
-        pypdf adapter and library-level correctness tests remain deferred.
+        PypdfTextExtractor implements this port; PDF-byte integration tests cover
+        page ordering, blank pages, malformed/encrypted PDFs and resource failure.
         """
         ...
 
@@ -93,12 +94,15 @@ class ExtractionStore(Protocol):
         orphaned PDF or missing page results. Unit mocks do not prove this guarantee.
         Assign and return a nonblank new identity only after successful commit.
         No business defaults/transitions here. Original PDFs/text are sensitive;
-        deferred storage must enforce access control and never log their contents.
+        local storage enforces OS-owner-only access and never logs their contents.
         Known write/commit/ack failure -> DocumentStorageError -> outer handler;
         unexpected errors propagate. Never report success before acknowledgement.
         Malformed acknowledgement -> Interactor -> InvalidStorageResult -> outer
         handler without presentation/retry. No automatic retry: ambiguous
         acknowledgement may follow a real commit.
-        Persistence, atomicity, identity generation and retention tests are deferred.
+        LocalJsonExtractionStore implements local PDF/JSON persistence with
+        staging, fsync and locked atomic publication. Integration tests exercise
+        private permissions, identity collisions and failure/concurrency behavior.
+        Automated retention/crash recovery and nonlocal storage remain deferred.
         """
         ...
