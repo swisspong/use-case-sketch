@@ -69,8 +69,14 @@ class FallbackExtractor(Protocol):
         No automatic retries or presenting/logging provider text. Use the exact
         configured model; never silently substitute another model or endpoint.
         Stored preset/model describe the attempted invocation even on failure.
+        The selected preset contains its required API key from trusted JSON. Use
+        that exact key, never an environment/global key or another preset's key.
+        No credentials in returned facts, storage, errors or diagnostics. Known
+        authentication failure -> FallbackExtractionError -> per-page recovery;
+        missing config key is rejected by application before any port call.
         Endpoint allowlisting, bounded rendering/network timeouts, payload limits,
-        credentials and actual vision model capability need deferred adapter tests.
+        credential transport/secrecy and actual vision model capability need
+        deferred adapter tests.
         Malformed/undeclared trusted result -> Interactor ->
         InvalidFallbackExtractionResult -> handler, never a failed business page.
         """

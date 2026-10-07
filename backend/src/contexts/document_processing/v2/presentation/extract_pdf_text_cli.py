@@ -1,7 +1,7 @@
 """Local CLI controller and safe outer error handler; no HTTP/API server."""
 
 import argparse
-import json
+import os
 import logging
 from pathlib import Path
 import sys
@@ -12,12 +12,23 @@ from ..application.use_cases.extract_pdf_text.configuration import (
 from ..application.use_cases.extract_pdf_text.errors import InvalidExtractionConfiguration
 from ..application.use_cases.extract_pdf_text.request import ExtractPdfTextRequest
 from ..composition import build_local_extraction
+from ..infrastructure.private_json_files import read_json
 from .json_cli_presenter import JsonCliPresenter
 
 
 def _load_config(path: Path) -> ExtractionConfig:
+    """Read bounded, owner-only regular JSON without following final symlinks.
+
+    The parent path must be administrator-controlled. Reuse strict private-file
+    parsing: duplicate keys/nonfinite numbers are errors, never silent overrides.
+    Never include content, file paths or credentials in configuration diagnostics.
+    """
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            data = read_json(directory_fd, path.name)
+        finally:
+            os.close(directory_fd)
         presets = data["presets"]
         if not isinstance(presets, list):
             raise TypeError("Expected preset list")
@@ -26,7 +37,7 @@ def _load_config(path: Path) -> ExtractionConfig:
             unreadable_threshold_percent=data.get("unreadable_threshold_percent", 60),
             suspicious_threshold_percent=data.get("suspicious_threshold_percent"),
         )
-    except (KeyError, TypeError, ValueError):
+    except (OSError, KeyError, TypeError, ValueError, RecursionError):
         raise InvalidExtractionConfiguration("Invalid extraction configuration file") from None
 
 

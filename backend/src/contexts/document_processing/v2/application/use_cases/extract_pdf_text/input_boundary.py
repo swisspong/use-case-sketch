@@ -8,7 +8,12 @@ class ExtractPdfTextInputBoundary(Protocol):
         """Extract pages, evaluate quality, selectively fall back, save, present.
 
         Trusted catalogue/threshold config is injected. The upload supplies only
-        the PDF and an approved preset name, never an endpoint/model/threshold.
+        the PDF and an approved preset name, never an endpoint/model/threshold/key.
+        The shared trusted catalogue requires a nonblank string api_key on every
+        preset, even offline. Missing/invalid keys -> InvalidExtractionConfiguration
+        -> outer handler before I/O, not a page failure or expected rejection.
+        Selected credentials reach only the model port; no environment fallback,
+        domain/storage/outcome credentials or config logging.
         Unknown preset and empty/non-bytes PDF emit typed rejections without I/O.
         Parser rejection emits its declared code without fallback or persistence.
         DocumentExtraction owns U+FFFD/non-whitespace code-point quality, strict

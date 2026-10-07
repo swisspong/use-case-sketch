@@ -60,7 +60,7 @@ def ports():
     fallback = create_autospec(FallbackExtractor, instance=True)
     store = create_autospec(ExtractionStore, instance=True)
     output = create_autospec(ExtractPdfTextOutputBoundary, instance=True)
-    preset = VisionPreset("approved-vision", "https://vision.example/v1", "vision-model")
+    preset = VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key")
     store.save.return_value = SavedDocument("document-82")
     return parser, fallback, store, output, preset
 
@@ -243,7 +243,7 @@ def test_fallback_preserves_raw_assessment_without_assessing_its_own_text(ports,
     )
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     output.present.assert_called_once_with(ExtractionSaved(
         "document-82",
@@ -349,7 +349,7 @@ def test_ordered_raw_reports_including_blank_source_are_saved_before_presentatio
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=3,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     store.save.assert_called_once()
     output.present.assert_called_once_with(ExtractionSaved(
@@ -447,7 +447,7 @@ def test_only_the_low_quality_page_uses_vision_and_saves_model_provenance(ports)
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=2,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     assert store.save.call_args.kwargs == {"pdf": b"%PDF-upload-82"}
     assert store.save.call_args.args[0].pages == (
@@ -474,7 +474,7 @@ def test_unreadable_vision_text_is_failed_without_retry_or_retaining_bad_text(po
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     assert store.save.call_args.args[0].pages == (
         PageExtraction(1, None, "failed", "vision", "unreadable", "approved-vision", "vision-model"),
@@ -492,7 +492,7 @@ def test_provider_failure_saves_partial_results_and_continues_later_pages(ports)
 
     def read_page(*, pdf, page_number, preset):
         assert pdf == b"%PDF-upload-82"
-        assert preset == VisionPreset("approved-vision", "https://vision.example/v1", "vision-model")
+        assert preset == VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key")
         if page_number == 2:
             raise FallbackExtractionError("private provider details")
         assert page_number == 3
@@ -524,7 +524,7 @@ def test_model_inability_is_a_saved_failed_page_not_a_system_exception(ports):
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     assert store.save.call_args.args[0].pages == (
         PageExtraction(1, None, "failed", "vision", "unreadable", "approved-vision", "vision-model"),
@@ -562,11 +562,11 @@ def test_unknown_upload_preset_is_rejected_before_any_io(ports, name):
 
 @pytest.mark.parametrize("presets", [
     (), (object(),),
-    (VisionPreset("", "https://vision.example/v1", "vision-model"),),
-    (VisionPreset("approved-vision", "", "vision-model"),),
-    (VisionPreset("approved-vision", "https://vision.example/v1", " "),),
-    (VisionPreset("duplicate", "https://first.example/v1", "first-model"),
-     VisionPreset("duplicate", "https://second.example/v1", "second-model")),
+    (VisionPreset("", "https://vision.example/v1", "vision-model", "synthetic-key"),),
+    (VisionPreset("approved-vision", "", "vision-model", "synthetic-key"),),
+    (VisionPreset("approved-vision", "https://vision.example/v1", " ", "synthetic-key"),),
+    (VisionPreset("duplicate", "https://first.example/v1", "first-model", "synthetic-first-key"),
+     VisionPreset("duplicate", "https://second.example/v1", "second-model", "synthetic-second-key")),
 ])
 def test_invalid_admin_catalogue_is_a_system_error_before_any_io(ports, presets):
     parser, fallback, store, output, _ = ports
@@ -601,7 +601,7 @@ def test_empty_or_non_bytes_upload_is_rejected_without_any_io(ports, pdf):
 def test_invalid_trusted_endpoint_is_not_treated_as_a_provider_outage(ports, endpoint):
     parser, fallback, store, output, _ = ports
     parser.extract.return_value = ParsedPdf((SourcePage(1, "Readable"),))
-    config = ExtractionConfig((VisionPreset("approved-vision", endpoint, "vision-model"),))
+    config = ExtractionConfig((VisionPreset("approved-vision", endpoint, "vision-model", "synthetic-key"),))
 
     with pytest.raises(InvalidExtractionConfiguration):
         execute(ports, config=config)
@@ -665,13 +665,13 @@ def test_selection_uses_the_second_approved_endpoint_and_model_and_records_them(
     parser, fallback, store, output, first = ports
     parser.extract.return_value = ParsedPdf((SourcePage(1, ""),))
     fallback.extract_page.return_value = VisionText("Recovered with selected model")
-    second = VisionPreset("vision-large", "https://other-vision.example/v1", "other-model")
+    second = VisionPreset("vision-large", "https://other-vision.example/v1", "other-model", "synthetic-large-key")
 
     execute(ports, preset_name="vision-large", config=ExtractionConfig((first, second)))
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("vision-large", "https://other-vision.example/v1", "other-model"),
+        preset=VisionPreset("vision-large", "https://other-vision.example/v1", "other-model", "synthetic-large-key"),
     )
     assert store.save.call_args.args[0].pages == (
         PageExtraction(1, "Recovered with selected model", "extracted", "vision", None, "vision-large", "other-model"),
@@ -695,7 +695,7 @@ def test_empty_source_falls_back_and_vision_uses_the_same_injected_threshold(por
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     assert store.save.call_args.args[0].pages == (
         PageExtraction(1, vision_text, "extracted", "vision", None, "approved-vision", "vision-model"),
@@ -729,7 +729,7 @@ def test_malformed_fallback_facts_do_not_become_failed_pages_or_success(ports, r
 
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     store.save.assert_not_called()
     output.present.assert_not_called()
@@ -747,7 +747,7 @@ def test_unexpected_fallback_error_propagates_and_stops_later_pages(ports):
     assert caught.value is failure
     fallback.extract_page.assert_called_once_with(
         pdf=b"%PDF-upload-82", page_number=1,
-        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model"),
+        preset=VisionPreset("approved-vision", "https://vision.example/v1", "vision-model", "synthetic-vision-key"),
     )
     store.save.assert_not_called()
     output.present.assert_not_called()

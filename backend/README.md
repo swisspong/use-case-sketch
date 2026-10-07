@@ -2,6 +2,8 @@
 
 Uses pypdf and the existing `ExtractPdfTextInteractor`/`DocumentExtraction`.
 No API server, IAM integration, rendering, OCR or remote vision calls are included.
+v2 additionally offers an explicit text-only OpenAI-compatible repair command;
+it never runs automatically during extraction.
 
 ## Versions
 
@@ -29,6 +31,56 @@ tests/integration/contexts/document_processing/{v1,v2}/
   Python module path is no longer supported. The existing console command remains
   compatible and pinned to v1.
 
+## v2 shared JSON configuration
+
+The v2 example is now `backend/examples/document_processing_config.json`, shared
+by `extract_pdf_text` and `repair_extracted_text`. Each trusted `presets` entry
+contains `name`, `endpoint`, `model` and a required nonblank string `api_key`:
+
+```json
+{
+  "presets": [
+    {
+      "name": "repair-approved",
+      "endpoint": "https://api.openai.com/v1",
+      "model": "<approved-model>",
+      "api_key": "REPLACE_WITH_YOUR_API_KEY"
+    }
+  ],
+  "unreadable_threshold_percent": 0,
+  "suspicious_threshold_percent": 0
+}
+```
+
+Both real v2 Interactors validate **every** preset before dependency I/O, even
+for offline extraction. Missing, blank or non-string keys are configuration
+exceptions routed to the outer handler, not business rejections/provider outages.
+Only the exact selected preset/key goes to the model port; there is no environment
+fallback. Keys are excluded from preset/config repr and
+from domain state, persisted results and Output Boundary outcomes.
+
+Both v2 CLI commands load the same trusted JSON schema. Repair uses only the
+selected preset's exact `api_key` as Bearer Authorization; there is no separate
+key argument or environment lookup. `api_key_env` is not a supported config field.
+Extraction vision remains offline. Existing key-free v2 config files must add a
+key to every preset. No saved-document migration is needed.
+
+Config must be a current-user-owned regular file without group/other permissions
+(e.g. `chmod 600`); final file/parent symlinks are rejected. Its parent path must
+be administrator-controlled. Parsing rejects duplicate keys, nonfinite numbers
+and files above 16 MiB. Unsafe/malformed config yields only safe stderr/exit 1.
+The tracked example contains placeholders only. Create a private, gitignored copy:
+
+```sh
+cp backend/examples/document_processing_config.json backend/examples/document_processing_config.local.json
+chmod 600 backend/examples/document_processing_config.local.json
+# Edit the private copy with your approved endpoint/model/api_key; never log it.
+```
+
+`backend/examples/*.local.json` is gitignored. Never commit real keys.
+Callers supply only a preset name, not a key/endpoint/model. The new example is
+v2-only: v1 remains unchanged and needs its original key-free config schema.
+
 ## Install and run
 
 From the repository root (Python 3.10+ and [uv](https://docs.astral.sh/uv/)):
@@ -37,7 +89,7 @@ From the repository root (Python 3.10+ and [uv](https://docs.astral.sh/uv/)):
 uv venv backend/.venv
 uv pip install --python backend/.venv/bin/python -e backend pytest
 backend/.venv/bin/extract-pdf-text /absolute/path/to/input.pdf \
-  --config backend/examples/extract_pdf_text_config.json \
+  --config /trusted/path/v1-extraction-config.json \
   --preset local-offline \
   --data-dir backend/local-documents
 ```
@@ -47,21 +99,23 @@ The equivalent module entry point is:
 ```sh
 backend/.venv/bin/python -m contexts.document_processing.v1.presentation.extract_pdf_text_cli \
   /absolute/path/to/input.pdf \
-  --config backend/examples/extract_pdf_text_config.json \
+  --config /trusted/path/v1-extraction-config.json \
   --preset local-offline --data-dir backend/local-documents
 ```
 
-To run the independent v2 copy, use the same arguments with
-`backend/.venv/bin/extract-pdf-text-v2`, or the module
-`contexts.document_processing.v2.presentation.extract_pdf_text_cli`.
+To run the independent v2 copy, use `backend/.venv/bin/extract-pdf-text-v2`, or
+`contexts.document_processing.v2.presentation.extract_pdf_text_cli`, with
+`--config backend/examples/document_processing_config.local.json` (private copy
+prepared above). This does not enable remote vision.
 
 Reinstall the editable package after changing console entry points:
 `uv pip install --python backend/.venv/bin/python -e backend`.
-Both versions can read the current example config; only v2 consumes its
-`suspicious_threshold_percent` field (currently `0`). Choose separate `--data-dir`
-paths if you want to keep experiments apart. The selected directory's parent must
-exist, and sensitive output must stay gitignored. The example config is shared;
-use separate config files if the versions need different settings.
+The new example is shared between the two v2 use cases, not between versions.
+v1's original config uses `name`/`endpoint`/`model` entries without `api_key`;
+v1 config loading and tests are outside this implementation's verified scope. Choose
+separate config files and `--data-dir` paths for version comparisons. The selected
+directory's parent must exist, and sensitive output/config must stay gitignored.
+v2 consumes `suspicious_threshold_percent` (currently `0` in the example).
 
 All three options are required. Preset lookup is exact; there is no default preset.
 The JSON config is a **trusted administrator file**, not upload-supplied configuration.
@@ -98,7 +152,8 @@ module entry point. No reinstall is needed for these source changes in an editab
   use. This is a heuristic, not a complete Thai spelling validator or confidence
   score. Legitimate text such as `วิตามินC` may be reported as suspicious.
 - Only parser raw text is assessed. Flags do not rewrite text, alter extraction
-  status, or trigger extra fallback. OCR/vision and LLM repair remain unavailable.
+  status, or trigger extra fallback. OCR/vision remain unavailable; text repair
+  requires the separate explicit command below.
 - Schema 2 adds ordered `raw_text_quality` reports containing `number`, `raw_text`,
   `spans`, counts, `suspicious_percent`, `threshold_percent` and `flagged`. Span
   offsets are zero-based Unicode code points with an exclusive end, referenced
@@ -108,7 +163,97 @@ module entry point. No reinstall is needed for these source changes in an editab
 - Every run creates a new document identity. Earlier saved results are not
   backfilled; consumers of new assessed runs must support schema 2.
 
-## Output and exit codes
+## v2 text-only repair and JSON repository
+
+The configured CLI uses the real JSON repository and per-preset JSON credentials
+through the OpenAI-compatible adapter. Tests use synthetic keys and a controlled
+HTTP/HTTPS server, not a live provider.
+
+Reinstall the editable package to enable the new command:
+
+```sh
+uv pip install --python backend/.venv/bin/python -e backend
+# Prepare a private chmod-600 JSON config with per-preset api_key as above.
+backend/.venv/bin/repair-extracted-text-v2 <saved-document-id> \
+  --page 3 --config /trusted/path/model-config.json \
+  --preset repair-approved --data-dir backend/local-documents
+```
+
+The module entry point is
+`contexts.document_processing.v2.presentation.repair_extracted_text_cli`.
+Use the **same administrator-controlled `presets` catalogue as extraction**.
+For example, the catalogue can include
+`{"name":"repair-approved","endpoint":"https://api.openai.com/v1","model":"<approved-text-model>","api_key":"REPLACE_WITH_YOUR_API_KEY"}`.
+The caller selects a name, never an endpoint/model. The existing `local-offline`
+example is a placeholder and is **not** a working repair provider configuration.
+No real provider/document calls are made by the tests or package installation.
+
+Only saved, assessed, flagged `pdf_text` pages are eligible. All exact raw page
+text and original spans are sent together once to `<endpoint>/chat/completions`.
+Treat this as a document upload: approve the provider's privacy, retention,
+capability and costs before running it on real documents. The client uses the
+selected preset's JSON `api_key` only. Credentials never enter stored outcomes,
+request bodies, stdout or diagnostic messages. The client uses
+OpenAI v1 JSON mode (`response_format: {"type":"json_object"}`); compatible
+providers must support it and the prompt's `outcome`/`edits` response format.
+Unsupported APIs/models are errors, not an invitation to substitute another model.
+HTTPS uses standard certificate verification. Plain HTTP is allowed only for
+loopback local models; redirects are never followed and requests are never retried.
+The default socket-operation timeout is 30 seconds (`--timeout-seconds`, >0 and
+<=300). This is not a total deadline or DNS-resolution timeout. `--max-tokens`
+sets the positive integer Chat Completions completion budget (default **2048**),
+including reasoning for providers that account for it. It does not cap input
+costs, guarantee a response within the timeout or guarantee enough tokens for a
+valid repair. A `finish_reason: "length"` response is a system/contract error,
+never recorded as no-change or partial success; there is no automatic retry.
+Providers must support `max_tokens`; unsupported parameters are safe system errors,
+not silently removed. Request/response bodies are additionally bounded to 2 MiB
+each. Set provider-side budgets/quota separately. Real provider interoperability and
+semantic repair accuracy remain unverified by the controlled HTTP tests.
+
+```text
+<data-dir>/
+  <document-id>/original.pdf         # unchanged
+  <document-id>/extraction.json      # unchanged, schema 1/2
+  repair-runs/
+    <repair-id>/record.json          # append-only repair collection, own schema 1
+```
+
+Each successful model decision (`suggested`, `no_changes`, `unrepairable`) creates
+one fresh record with `schema_version`, `repair_id`, UTC `created_at`, document/page,
+trusted preset/model, outcome and code-point edits. Rejections and system failures
+are not audit records. Raw page text is not duplicated: offsets reference the
+immutable saved extraction. Suggestions are **not** accepted corrections and are
+never applied to the PDF, raw reports or extraction. Neither `no_changes` nor
+`unrepairable` certifies correctness.
+
+`RepairRunRepository.save/get/list_by_document` is an application-owned port;
+`LocalJsonRepairRunRepository` implements it without DB/ORM dependencies inward.
+A future DB adapter can replace it in composition. This is not a general database:
+there are no update/delete operations, shared index, cross-record transactions or
+pagination. Listing scans published records and is not a point-in-time snapshot.
+
+The repository uses the same local Linux/POSIX assumptions as extraction: private
+0700 directories/0600 JSON, fsynced staging then locked collision-check and atomic
+rename, followed by collection fsync. Reads reject unsafe final symlinks, shared
+permissions, corrupt/misbound records and unrecognized schemas. The root's parent
+must be trusted. Atomicity/durability do not extend to remote model calls. Abrupt
+process death can leave private `.staging-*` entries, which listing ignores; clean
+only with writers stopped. A failed acknowledgement/presentation/stdout may leave
+a complete record and an already billed remote call. Inspect history before any
+manual retry; automatic retry, rollback of remote effects and deduplication are
+not provided. Existing documents are not migrated or modified.
+
+Repair exits: **0** for a recorded model outcome, **2** for `invalid_request`,
+`invalid_preset`, `page_not_found`, `vision_page`, `not_assessed`, or `page_not_flagged`,
+and **1** for safe stderr `{"outcome":"error","code":"system_error"}`. Stdout
+contains only outcome/provenance, document/page, `repair_id`, edit count and an
+absolute `files.repair_json` path—not source text, replacement strings or provider
+messages. JSON strings escape control/non-ASCII characters. Stored proposals are
+sensitive untrusted data; escape appropriately when displaying them.
+Authorization is still private-file/current-OS-user based, not multi-user IAM.
+
+## Output and exit codes (extraction)
 
 - `0`: one summary JSON on stdout with the document ID, page counts and absolute
   paths to the saved PDF/JSON. Extracted text and per-page details are **not printed**.
@@ -210,6 +355,12 @@ cd backend
 
 Tests use disposable temporary directories, real PDF bytes/parser and real local
 storage. OS/library fault injection covers failure paths; the concurrency case uses
-independent writers with a barrier and real filesystem locking. No real vision
-provider compatibility, physical crash/power-loss durability or remote guarantees
-are claimed.
+independent writers with a barrier and real filesystem locking. Text repair tests additionally exercise the configured console/module entry points,
+real JSON ports, concurrent publication, pre/post-commit failures and an isolated
+loopback HTTP provider (request shape, typed outcomes, timeout, payload bounds,
+redirect/error handling, exact selected-key Authorization without environment
+credentials, safe config failures, private permissions and secret-free outputs).
+A chained extraction-to-repair case uses the same private catalogue and preserves
+the original saved PDF/JSON. The provider is controlled test infrastructure, not a
+real service. No real vision/text-provider compatibility, semantic repair accuracy,
+physical crash/power-loss durability or remote guarantees are claimed.

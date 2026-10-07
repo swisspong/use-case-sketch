@@ -117,9 +117,11 @@ def test_known_library_resource_failure_is_a_system_error_not_a_pdf_rejection(mo
 def cli_files(tmp_path):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({
-        "presets": [{"name": "vision", "endpoint": "https://vision.example/v1", "model": "selected-model"}],
+        "presets": [{"name": "vision", "endpoint": "https://vision.example/v1",
+                     "model": "selected-model", "api_key": "synthetic-extraction-json-key"}],
         "unreadable_threshold_percent": 60,
     }))
+    config.chmod(0o600)
     upload = tmp_path / "upload.pdf"
     upload.write_bytes(make_pdf())
     return config, upload, tmp_path / "documents"
@@ -127,6 +129,14 @@ def cli_files(tmp_path):
 
 def run_cli(cli_files, *, preset="vision", module=False, legacy=False):
     config, upload, root = cli_files
+    if legacy:
+        # v1 keeps its original key-free schema; don't share v2 credentials.
+        settings = json.loads(config.read_text())
+        for preset_config in settings["presets"]:
+            preset_config.pop("api_key", None)
+        config = config.with_name("v1-config.json")
+        config.write_text(json.dumps(settings))
+        config.chmod(0o600)
     script = "extract-pdf-text" if legacy else "extract-pdf-text-v2"
     command = ([sys.executable, "-m", "contexts.document_processing.v2.presentation.extract_pdf_text_cli"]
                if module else [str(Path(sys.executable).parent / script)])
@@ -278,6 +288,8 @@ def test_cli_saves_partial_results_with_unavailable_fallback_and_exact_uploaded_
          "failure_code": None, "preset_name": None, "model": None},
     ]
     assert stored["document_id"] == directory.name
+    assert "api_key" not in stored
+    assert "synthetic-extraction-json-key" not in result.stdout + result.stderr + json.dumps(stored)
 
 
 # The main tracer implemented these paths; add regression without deleting code.
@@ -565,6 +577,52 @@ def test_cli_reports_absolute_file_paths_when_data_directory_is_relative(cli_fil
     }
     assert Path(response["files"]["original_pdf"]).read_bytes() == upload.read_bytes()
     assert json.loads(Path(response["files"]["extraction_json"]).read_text())["document_id"] == directory.name
+
+
+def test_same_private_json_catalogue_drives_extraction_then_explicit_text_repair(
+    cli_files, repair_provider, monkeypatch, capsys,
+):
+    from contexts.document_processing.v2.presentation.repair_extracted_text_cli import main as repair
+    config, upload, root = cli_files
+    settings = json.loads(config.read_text())
+    settings["presets"][0]["endpoint"] = repair_provider.endpoint
+    settings["suspicious_threshold_percent"] = 0
+    config.write_text(json.dumps(settings))
+    upload.write_bytes(make_pdf(texts=("กAข",), unicode_text=True))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    extraction = run_cli(cli_files)
+
+    assert extraction.returncode == 0, extraction.stderr
+    assert extraction.stderr == ""
+    assert repair_provider.requests == []  # Repair is opt-in, never automatic.
+    saved = json.loads(extraction.stdout)
+    original_json = Path(saved["files"]["extraction_json"]).read_bytes()
+    assert repair([
+        saved["document_id"], "--page", "1", "--config", str(config),
+        "--preset", "vision", "--data-dir", str(root),
+    ]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    result = json.loads(captured.out)
+    assert result["outcome"] == "suggested"
+    assert result["document_id"] == saved["document_id"]
+    assert result["page_number"] == 1
+    assert Path(saved["files"]["extraction_json"]).read_bytes() == original_json
+    assert Path(saved["files"]["original_pdf"]).read_bytes() == upload.read_bytes()
+    record = Path(result["files"]["repair_json"]).read_text()
+    assert json.loads(record)["edits"] == [{"start": 0, "end": 3, "replacement": "กาข"}]
+    assert len(repair_provider.requests) == 1
+    _, headers, body = repair_provider.requests[0]
+    assert headers["Authorization"] == "Bearer synthetic-extraction-json-key"
+    assert body["model"] == "selected-model"
+    assert json.loads(body["messages"][1]["content"]) == {
+        "raw_text": "กAข", "spans": [{"start": 1, "end": 2, "reason": "latin_adjacent_to_thai"}],
+    }
+    assert "synthetic-extraction-json-key" not in (
+        extraction.stdout + extraction.stderr + captured.out + captured.err
+        + record + original_json.decode() + json.dumps(body)
+    )
 
 
 def test_cli_summary_reports_all_failed_pages_without_false_extraction_success(cli_files):
