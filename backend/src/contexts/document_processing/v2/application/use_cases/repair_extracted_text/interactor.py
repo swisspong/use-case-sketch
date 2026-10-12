@@ -6,7 +6,10 @@ from ....domain.documents.text_repairs import (
     PageRepairSuggestions, RepairEditCandidate, RepairSourceText,
 )
 from ...model_presets import ModelPresetCatalogue, UnknownVisionPreset
-from .errors import InvalidRepairSourceResult, InvalidTextRepairResult
+from .errors import (
+    InvalidRepairSourceResult, InvalidTextRepairResult, OutsideSignalsDiagnostic,
+    PROPOSAL_DIAGNOSTIC_RANGE_LIMIT,
+)
 from .input_boundary import RepairExtractedTextInputBoundary
 from .output_boundary import RepairExtractedTextOutputBoundary
 from .ports import (
@@ -105,7 +108,25 @@ class RepairExtractedTextInteractor(RepairExtractedTextInputBoundary):
                             for edit in result.edits),
             )
             if not isinstance(proposal, PageRepairSuggestions):
-                raise InvalidTextRepairResult("Invalid model repair proposal")
+                diagnostic = None
+                if proposal.reason == "outside_signals":
+                    diagnostic = OutsideSignalsDiagnostic(
+                        edit_count=len(result.edits),
+                        outside_signal_edit_count=len(proposal.outside_signal_edit_indices),
+                        signal_count=len(repair_source.spans),
+                        outside_signal_edit_ranges=tuple(
+                            (result.edits[index].start, result.edits[index].end)
+                            for index in proposal.outside_signal_edit_indices[:PROPOSAL_DIAGNOSTIC_RANGE_LIMIT]
+                        ),
+                        signal_ranges=tuple(
+                            (span.start, span.end)
+                            for span in repair_source.spans[:PROPOSAL_DIAGNOSTIC_RANGE_LIMIT]
+                        ),
+                    )
+                raise InvalidTextRepairResult(
+                    "Invalid model repair proposal", reason=proposal.reason,
+                    proposal_diagnostic=diagnostic,
+                )
             self._record_and_present(RepairSuggested(
                 request.document_id, request.page_number,
                 tuple(SuggestedTextRepair(edit.start, edit.end, edit.replacement)

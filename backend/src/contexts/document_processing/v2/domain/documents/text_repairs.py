@@ -56,6 +56,8 @@ class RepairEditCandidate:
 @dataclass(frozen=True)
 class InvalidRepairSuggestions:
     reason: Literal["invalid_edits", "out_of_bounds", "outside_signals", "overlapping_edits"]
+    # Supplemental diagnostic facts; the reason remains the rejection identity.
+    outside_signal_edit_indices: tuple[int, ...] = field(default=(), repr=False, compare=False)
 
 
 @dataclass(frozen=True, init=False)
@@ -84,9 +86,12 @@ class PageRepairSuggestions:
             return InvalidRepairSuggestions("invalid_edits")
         if any(not 0 <= edit.start < edit.end <= len(source.raw_text) for edit in edits):
             return InvalidRepairSuggestions("out_of_bounds")
-        if any(not any(edit.start < span.end and span.start < edit.end for span in source.spans)
-               for edit in edits):
-            return InvalidRepairSuggestions("outside_signals")
+        outside_signal_edit_indices = tuple(
+            index for index, edit in enumerate(edits)
+            if not any(edit.start < span.end and span.start < edit.end for span in source.spans)
+        )
+        if outside_signal_edit_indices:
+            return InvalidRepairSuggestions("outside_signals", outside_signal_edit_indices)
         ordered = sorted(edits, key=lambda edit: edit.start)
         if any(left.end > right.start for left, right in zip(ordered, ordered[1:])):
             return InvalidRepairSuggestions("overlapping_edits")

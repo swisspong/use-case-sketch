@@ -12,24 +12,117 @@ Source and owning tests are isolated by version:
 ```text
 src/contexts/document_processing/
   v1/  # Preserved baseline
-  v2/  # Report-only text detector integrated with CLI/config/storage
+  v2/  # Preserved extraction/repair baseline
+  v3/  # Extraction + OCR suggestion (no model) + user-triggered OCR command
 
-tests/unit/contexts/document_processing/{v1,v2}/
-tests/integration/contexts/document_processing/{v1,v2}/
+tests/unit/contexts/document_processing/{v1,v2,v3}/
+tests/integration/contexts/document_processing/{v1,v2,v3}/
 ```
 
 - `extract-pdf-text` and `extract-pdf-text-v1` run **v1**.
 - `extract-pdf-text-v2` runs **v2**.
 - v2 adds an opt-in report-only detector for suspicious raw text. Its source uses
   version-local relative imports; it does not depend on or change v1 code.
-- Develop improvements only in v2 and its tests; preserve v1 as the comparison
-  baseline. Future ideas/undecided behavior are recorded in [NOTES.md](NOTES.md).
+- `extract-pdf-text-v3` runs **v3**. Text repair (use case, domain proposals,
+  adapters, Presenter, CLI and owning tests) is removed from v3; there is no
+  `repair-extracted-text-v3` command. v2 repair remains available and unchanged.
+- Develop new improvements only in v3 and its tests; preserve v1/v2 as comparison
+  baselines. v3 extraction never calls a model: it **suggests** pages for the
+  separate, user-triggered `ocr-document-pages-v3` command and saves JSON schema 3.
+  Imports are version-local.
 - v1 and unassessed v2 runs retain JSON schema 1 and the original summary format.
   Assessed v2 runs use `schema_version: 2` and add summary counts. Schema version
   is not application version. Existing documents are not migrated or overwritten.
-- Python imports/module entry points now include `.v1` or `.v2`; the old unversioned
+- Python imports/module entry points include `.v1`, `.v2` or `.v3`; the old unversioned
   Python module path is no longer supported. The existing console command remains
   compatible and pinned to v1.
+
+## Run v3
+
+From the repository root, run the v3 module directly:
+
+```sh
+PYTHONPATH=backend/src backend/.venv/bin/python \
+  -m contexts.document_processing.v3.presentation.extract_pdf_text_cli \
+  /absolute/path/to/input.pdf \
+  --config /trusted/path/document_processing_config.local.json \
+  --data-dir backend/local-documents/v3
+```
+
+The data directory's parent must already exist and be trusted. Use separate data
+paths when comparing versions. Config must be owner-only (`chmod 600`) and uses
+the same strict private JSON loader as v2. v3 extraction has **no `--preset`** and
+reads only `unreadable_threshold_percent` (default 60) and optional
+`suspicious_threshold_percent`; a `presets` catalogue in the same file is ignored
+by extraction and read only by the OCR command below.
+
+### v3 OCR suggestion
+
+For every page, v3 counts **problem characters**: the union of non-whitespace
+positions flagged by local signals, each counted once:
+
+- `replacement_character` (U+FFFD), `unexpected_control`, `private_use_character`
+- `latin_adjacent_to_thai` (font substitution such as `ทีC` = ที่, `เชืMอ` = เชื้อ)
+- `thai_mark_sequence` (orphan, repeated or conflicting Thai marks)
+- `split_thai_syllable` (whitespace inside a syllable that cannot end there:
+  consonant + tone mark with no vowel, e.g. `ป่ วย`, or `เ`+consonant+`ิ/ี/ึ/ื`, e.g.
+  `เปิ ด`; ordinary word-final marks such as `ได้ `, `แก่ `, `แพทย์ ` are not counted)
+
+A page is `ocr_suggested` when it is blank (`ocr_reason: "blank_page"`) or its
+problem percentage is **strictly above** `unreadable_threshold_percent`
+(`ocr_reason: "problem_characters"`). Font-substitution errors usually affect only a
+few percent of characters, so use a low threshold (e.g. `1`) to catch them. Parser
+text is always saved unchanged; no page is OCR'd automatically.
+
+v3 always saves `schema_version: 3`: each page has `number`, `text`,
+`ocr_suggested`, `ocr_reason`, `problem_character_count`,
+`non_whitespace_character_count` and `problem_percent`. `raw_text_quality` is added
+only when `suspicious_threshold_percent` is set (report-only, as in v2). The stdout
+summary is `{"total_pages": N, "ocr_suggested_pages": [...]}` plus
+`assessed_pages`/`suspicious_pages` when assessed. Rejections are `invalid_pdf` or
+`encrypted_pdf` only.
+
+For console commands and integration tests, reinstall after removing the repair
+entry point: `uv pip install --python backend/.venv/bin/python -e backend`.
+`extract-pdf-text-v3` remains available; the v3 repair command and module are removed.
+
+### v3 OCR of saved pages (user-triggered)
+
+```sh
+ocr-document-pages-v3 <document_id> --preset mfec \
+  --config /trusted/path/document_processing_config.local.json \
+  --data-dir backend/local-documents/v3 [--pages 2,5]
+```
+
+Without `--pages`, every `ocr_suggested` page of the saved document is OCR'd;
+explicit pages may include unsuggested ones (`was_suggested: false`). Each page is
+rendered with pypdfium2 (200 DPI, longest side ≤ 2000 px, PNG) and sent once, in
+document order, to `<preset.endpoint>/chat/completions` (OpenAI-compatible, e.g.
+the LiteLLM proxy) with the selected preset's `model`/`api_key` only; no retry, no
+environment key, HTTPS verified, plain HTTP only to loopback, 120 s socket timeout.
+The model must reply JSON `{"outcome":"text","text":...}` or
+`{"outcome":"unreadable"}`. Accepted text must pass the document's **saved**
+`threshold_percent` (blank or strictly above -> `unreadable`, text discarded).
+Provider/render failures and malformed/truncated replies make only that page
+`ocr_unavailable`; later pages continue.
+
+When every selected page is terminal, one attempt is appended atomically as
+`<data-dir>/<document_id>/ocr/<attempt_id>.json` (owner-only, attempt
+`schema_version: 1`: preset name, model, threshold, pages with status/text/counts;
+never the API key). `extraction.json`, `original.pdf` and earlier attempts are never
+changed. stdout is a summary only (exit 0):
+`{"outcome":"saved","document_id","attempt_id","summary":{"pages","extracted","unreadable","ocr_unavailable"},"files":{"ocr_attempt_json"}}`.
+Rejections (exit 2, no OCR/storage): `invalid_preset`, `document_not_found`,
+`no_pages_selected`, `page_not_found`, `duplicate_page`, `no_suggested_pages`.
+System failures (exit 1) print only `{"outcome":"error","code":"system_error"}`;
+they may follow paid OCR calls or a committed attempt file, so do not retry blindly.
+Each run sends page images of the document to the configured provider.
+
+The v2 storage guarantees and security behavior documented below also apply to v3;
+v2 presets, fallback and schema 1/2 descriptions do not. There is no schema
+migration or repair in v3. Existing saved data is not deleted or modified.
+Existing v1/v2 commands remain unchanged; the repair documentation below applies
+to v2 only.
 
 ## v2 shared JSON configuration
 
@@ -332,30 +425,37 @@ bounded by upload/page/time limits; use trusted local inputs for now.
 
 Install the editable package first so integration tests exercise the installed
 version-specific console entry points, not just a manually wired test Interactor.
-Both suites check the legacy console alias (pinned to v1) and installed command
-routing. v2 adds detector config/schema/summary coverage through actual console
+All version suites check the legacy console alias (pinned to v1) and installed
+command routing. v3 also verifies that only v2 retains its repair command.
+v2 adds detector config/schema/summary coverage through actual console
 and module entry points, using synthetic PDF mappings rather than private PDFs.
 It also extends permissions, failure and concurrency coverage to schema 2.
 pytest uses `--import-mode=importlib` so matching test filenames do not collide.
 
 ```sh
 cd backend
-# Run both versions
+# Run all three versions
 .venv/bin/python -m pytest tests/unit/contexts/document_processing \
   tests/integration/contexts/document_processing -q
 # Preserve the baseline
 .venv/bin/python -m pytest tests/unit/contexts/document_processing/v1 \
   tests/integration/contexts/document_processing/v1 -q
-# Work on v2
+# Preserve the v2 baseline
 .venv/bin/python -m pytest tests/unit/contexts/document_processing/v2 \
   tests/integration/contexts/document_processing/v2 -q
+# Work on v3
+.venv/bin/python -m pytest tests/unit/contexts/document_processing/v3 \
+  tests/integration/contexts/document_processing/v3 -q
 # Full backend regression
 .venv/bin/python -m pytest -q
 ```
 
 Tests use disposable temporary directories, real PDF bytes/parser and real local
 storage. OS/library fault injection covers failure paths; the concurrency case uses
-independent writers with a barrier and real filesystem locking. Text repair tests additionally exercise the configured console/module entry points,
+independent writers with a barrier and real filesystem locking. v3 preserves all
+extraction test variants from v2, including credentials and private config errors;
+its former chained case now checks an unchanged flagged page without repair history.
+Text repair tests remain in v2 only and additionally exercise the configured console/module entry points,
 real JSON ports, concurrent publication, pre/post-commit failures and an isolated
 loopback HTTP provider (request shape, typed outcomes, timeout, payload bounds,
 redirect/error handling, exact selected-key Authorization without environment

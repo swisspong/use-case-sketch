@@ -5,6 +5,7 @@ state are created per execution; no shared Presenter or network connection.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from .application.use_cases.extract_pdf_text.configuration import ExtractionConfig
 from .application.use_cases.extract_pdf_text.input_boundary import ExtractPdfTextInputBoundary
@@ -19,6 +20,7 @@ from .application.use_cases.repair_extracted_text.interactor import RepairExtrac
 from .application.use_cases.repair_extracted_text.output_boundary import RepairExtractedTextOutputBoundary
 from .infrastructure.local_json_repair_page_source import LocalJsonRepairPageSource
 from .infrastructure.local_json_repair_run_repository import LocalJsonRepairRunRepository
+from .infrastructure.local_json_repair_failure_log import LocalJsonRepairFailureLog
 from .infrastructure.openai_compatible_text_repairer import OpenAICompatibleTextRepairer
 
 
@@ -35,9 +37,17 @@ def build_local_text_repair(
     *, catalogue: ModelPresetCatalogue, data_dir: Path,
     output: RepairExtractedTextOutputBoundary,
     timeout_seconds: float = 30, max_tokens: int = 2048,
+    reasoning_effort: Literal["low"] | None = None,
 ) -> RepairExtractedTextInputBoundary:
     return RepairExtractedTextInteractor(
         source=LocalJsonRepairPageSource(data_dir),
-        repairer=OpenAICompatibleTextRepairer(timeout_seconds=timeout_seconds, max_tokens=max_tokens),
+        repairer=OpenAICompatibleTextRepairer(
+            timeout_seconds=timeout_seconds, max_tokens=max_tokens, reasoning_effort=reasoning_effort,
+        ),
         repository=LocalJsonRepairRunRepository(data_dir), output=output, catalogue=catalogue,
     )
+
+
+def build_local_repair_failure_log(*, log_dir: Path) -> LocalJsonRepairFailureLog:
+    """Outer-handler logging only; never an Interactor dependency."""
+    return LocalJsonRepairFailureLog(log_dir)

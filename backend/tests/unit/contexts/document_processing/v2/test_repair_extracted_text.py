@@ -229,6 +229,82 @@ def test_malformed_model_result_never_becomes_a_success_or_business_rejection(po
     output.present.assert_not_called()
 
 
+@pytest.mark.parametrize("edits,reason", [
+    ((), "invalid_edits"),
+    ((SuggestedTextRepair(1, 8, "private proposal"),), "out_of_bounds"),
+    ((SuggestedTextRepair(0, 1, "private proposal"),), "outside_signals"),
+    ((SuggestedTextRepair(0, 3, "private proposal"), SuggestedTextRepair(1, 2, "other")), "overlapping_edits"),
+])
+def test_invalid_proposal_keeps_safe_domain_reason_without_recording_history(ports, edits, reason):
+    from contexts.document_processing.v2.application.use_cases.repair_extracted_text.ports import RepairRunRepository
+
+    _, repairer, output = ports
+    load_flagged_page(ports)
+    repairer.propose.return_value = TextRepairProposal(edits)
+    repository = create_autospec(RepairRunRepository, instance=True)
+
+    with pytest.raises(InvalidTextRepairResult) as caught:
+        execute(ports, repository=repository)
+
+    assert caught.value.reason == reason
+    assert_exact_page_invocation(ports)
+    repository.save.assert_not_called()
+    output.present.assert_not_called()
+
+
+def test_outside_signal_failure_carries_only_counts_and_rejected_offsets_in_proposed_order(ports):
+    from contexts.document_processing.v2.application.use_cases.repair_extracted_text.ports import RepairRunRepository
+
+    _, repairer, output = ports
+    load_flagged_page(ports)
+    repairer.propose.return_value = TextRepairProposal((
+        SuggestedTextRepair(3, 4, "valid private replacement"),
+        SuggestedTextRepair(2, 3, "private rejected replacement"),
+        SuggestedTextRepair(0, 1, "another private replacement"),
+    ))
+    repository = create_autospec(RepairRunRepository, instance=True)
+
+    with pytest.raises(InvalidTextRepairResult) as caught:
+        execute(ports, repository=repository)
+
+    assert caught.value.reason == "outside_signals"
+    details = caught.value.proposal_diagnostic
+    assert details.edit_count == 3
+    assert details.outside_signal_edit_count == 2
+    assert details.signal_count == 5
+    assert details.outside_signal_edit_ranges == ((2, 3), (0, 1))
+    assert details.signal_ranges == ((1, 2), (3, 4), (4, 5), (5, 6), (6, 7))
+    assert "private" not in repr(details)
+    assert_exact_page_invocation(ports)
+    repository.save.assert_not_called()
+    output.present.assert_not_called()
+
+
+def test_outside_signal_diagnostic_keeps_total_counts_but_only_first_ten_ranges(ports):
+    source, repairer, output = ports
+    document = make_document(raw_text="กAข" * 15)
+    source.load_page.return_value = LoadedRepairPage(
+        "doc-review-17", document.pages[2], document.raw_text_quality[2],
+    )
+    repairer.propose.return_value = TextRepairProposal(tuple(
+        SuggestedTextRepair(3 * index, 3 * index + 1, "private replacement") for index in range(15)
+    ))
+
+    with pytest.raises(InvalidTextRepairResult) as caught:
+        execute(ports)
+
+    details = caught.value.proposal_diagnostic
+    assert (details.edit_count, details.outside_signal_edit_count, details.signal_count) == (15, 15, 15)
+    assert details.outside_signal_edit_ranges == (
+        (0, 1), (3, 4), (6, 7), (9, 10), (12, 13), (15, 16), (18, 19), (21, 22), (24, 25), (27, 28),
+    )
+    assert details.signal_ranges == (
+        (1, 2), (4, 5), (7, 8), (10, 11), (13, 14), (16, 17), (19, 20), (22, 23), (25, 26), (28, 29),
+    )
+    output.present.assert_not_called()
+    assert repairer.propose.call_count == 1
+
+
 @pytest.mark.parametrize("start,end", [(-1, 2), (1, 1), (2, 1), (1, 8)])
 def test_edit_range_must_be_nonempty_and_within_raw_codepoint_bounds(ports, start, end):
     _, repairer, output = ports
@@ -288,6 +364,26 @@ def test_adjacent_edits_allow_deletion_and_preserve_proposed_order(ports):
         (SuggestedTextRepair(3, 4, ""), SuggestedTextRepair(0, 3, "กาข")),
         "approved-model", "text-model", repair_id="repair-run-19",
     ))
+
+
+@pytest.mark.parametrize("failure_type", [InvalidTextRepairResult, TextRepairError])
+@pytest.mark.parametrize("arguments", [(), ("private model details",), ("private model details", "extra")])
+def test_model_contract_failure_preserves_existing_exception_arguments_and_identity(ports, arguments, failure_type):
+    _, repairer, output = ports
+    load_flagged_page(ports)
+    failure = failure_type(*arguments)
+    repairer.propose.side_effect = failure
+
+    with pytest.raises(failure_type) as caught:
+        execute(ports)
+
+    assert caught.value is failure
+    assert caught.value.args == arguments
+    assert caught.value.reason is None
+    if isinstance(failure, TextRepairError):
+        assert caught.value.http_status is None
+    assert_exact_page_invocation(ports)
+    output.present.assert_not_called()
 
 
 @pytest.mark.parametrize("failure", [TextRepairError("provider unavailable"), KeyError("unexpected")])
