@@ -30,7 +30,7 @@ async def test_success_response_is_sent_only_after_commit(engine, database_url):
                 ):
                     seen.append(
                         (await reader.get("/text-quality/thresholds")).json()[
-                            "min_thai_percent"
+                            "max_thai_percent"
                         ]
                     )
                 await send(message)
@@ -42,7 +42,7 @@ async def test_success_response_is_sent_only_after_commit(engine, database_url):
                 transport=httpx.ASGITransport(app=observed_app), base_url="http://test"
             ) as writer:
                 response = await writer.patch(
-                    "/text-quality/thresholds", json={"min_thai_percent": 82}
+                    "/text-quality/thresholds", json={"max_thai_percent": 82}
                 )
                 assert response.status_code == 200
                 assert seen == [82]

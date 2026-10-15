@@ -18,8 +18,12 @@ class PdfUnreadable(Invalid):
 
 
 class DocumentNotFound(NotFound):
-    code, error_code = "document_not_found", "DOC_005"
+    code, error_code = "document_not_found", "DOC_007"
 
 
 class ProcessingTimeout(Invalid):
     code, error_code = "processing_timeout", "DOC_006"
+
+
+class PageNotFound(NotFound):
+    code, error_code = "page_not_found", "DOC_008"

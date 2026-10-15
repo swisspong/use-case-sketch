@@ -9,7 +9,7 @@ from app.shared.db import Base
 
 @dataclass(frozen=True)
 class Thresholds:
-    min_thai_percent: int
+    max_thai_percent: int
     max_garbled_thai_percent: int
     min_text_chars: int
     max_image_percent: int
@@ -17,7 +17,7 @@ class Thresholds:
     @classmethod
     def defaults(cls, settings: Settings) -> "Thresholds":
         return cls(
-            settings.text_quality_default_min_thai_percent,
+            settings.text_quality_default_max_thai_percent,
             settings.text_quality_default_max_garbled_thai_percent,
             settings.text_quality_default_min_text_chars,
             settings.text_quality_default_max_image_percent,
@@ -29,7 +29,7 @@ class TextQualityThresholds(Base):
     __table_args__ = (
         CheckConstraint("id = 1", name="single_row"),
         CheckConstraint(
-            "min_thai_percent BETWEEN 0 AND 100", name="min_thai_percent_range"
+            "max_thai_percent BETWEEN 0 AND 100", name="max_thai_percent_range"
         ),
         CheckConstraint(
             "max_garbled_thai_percent BETWEEN 0 AND 100",
@@ -41,7 +41,7 @@ class TextQualityThresholds(Base):
         ),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
-    min_thai_percent: Mapped[int] = mapped_column(Integer)
+    max_thai_percent: Mapped[int] = mapped_column(Integer)
     max_garbled_thai_percent: Mapped[int] = mapped_column(Integer)
     min_text_chars: Mapped[int] = mapped_column(Integer)
     max_image_percent: Mapped[int] = mapped_column(Integer)

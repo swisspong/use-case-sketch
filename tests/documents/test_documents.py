@@ -15,6 +15,13 @@ from app.shared.config import Settings, get_settings
 from app.shared.deps import get_pdf_inspector
 from tests.fakes import WaitingPdfInspector
 
+THRESHOLDS = {
+    "max_thai_percent": 50,
+    "max_garbled_thai_percent": 5,
+    "min_text_chars": 50,
+    "max_image_percent": 80,
+}
+
 
 def pdf(pages=2, encrypted=False):
     writer = PdfWriter()
@@ -51,9 +58,11 @@ async def test_upload_list_detail_and_exact_original(client, session):
     doc = result["document"]
     assert doc["filename"] == "ทดสอบ.pdf"
     assert doc["page_count"] == 3 and doc["size_bytes"] == len(original)
-    assert doc["quality_status"] == "not_checked" and doc["ocr_suggested_count"] is None
+    assert doc["quality_status"] == "checked" and doc["ocr_suggested_count"] == 3
     assert (await client.get("/documents")).json() == {"items": [doc], "total": 1}
-    assert (await client.get(f"/documents/{doc['id']}")).json() == doc
+    detail = (await client.get(f"/documents/{doc['id']}")).json()
+    assert {k: v for k, v in detail.items() if k != "pages"} == doc
+    assert len(detail["pages"]) == 3
     source = await client.get(f"/documents/{doc['id']}/original")
     assert source.content == original
     assert source.headers["content-type"] == "application/pdf"
@@ -164,7 +173,7 @@ async def test_missing_document_and_original(client):
     for path in (f"/documents/{uuid.uuid4()}", f"/documents/{uuid.uuid4()}/original"):
         response = await client.get(path)
         assert (
-            response.status_code == 404 and response.json()["error_code"] == "DOC_005"
+            response.status_code == 404 and response.json()["error_code"] == "DOC_007"
         )
 
 
@@ -181,7 +190,13 @@ async def test_cancellation_before_save(session):
     inspector = WaitingPdfInspector()
     task = asyncio.create_task(
         upload_document(
-            "test.pdf", pdf(), DocumentRepo(session), inspector, 1024 * 1024, 1
+            "test.pdf",
+            pdf(),
+            DocumentRepo(session),
+            inspector,
+            1024 * 1024,
+            1,
+            THRESHOLDS,
         )
     )
     await inspector.started.wait()
@@ -242,7 +257,7 @@ async def test_database_rolls_back_original_and_metadata_together(session):
     with pytest.raises(RuntimeError):
         async with session.begin_nested():
             await upload_document(
-                "test.pdf", pdf(), repo, LocalPdfInspector(), 1024 * 1024, 5
+                "test.pdf", pdf(), repo, LocalPdfInspector(), 1024 * 1024, 5, THRESHOLDS
             )
             raise RuntimeError("simulate transaction failure")
     assert (await repo.list_documents(1, 20)) == ([], 0)

@@ -36,6 +36,8 @@ type = "independence"
 modules = ["app.modules.text_quality", "app.modules.llm_config", "app.modules.documents"]
 ignore_imports = [
   "app.shared.deps -> app.modules.documents.ports",
+  "app.shared.deps -> app.modules.text_quality.models",
+  "app.shared.deps -> app.modules.text_quality.repository",
   "app.shared.resources -> app.modules.documents.adapters.pdf_inspector",
   "app.shared.deps -> app.modules.llm_config.repository",
   "app.shared.deps -> app.modules.llm_config.ports",

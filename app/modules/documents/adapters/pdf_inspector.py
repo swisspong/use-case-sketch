@@ -1,11 +1,12 @@
 import asyncio
+import json
 import sys
 
 from app.modules.documents.errors import PdfUnreadable, ProcessingTimeout
 
 
 class LocalPdfInspector:
-    async def page_count(self, content: bytes, timeout: float) -> int:
+    async def extract_pages(self, content: bytes, timeout: float) -> list[dict]:
         # Isolate parsing so deadline/cancellation can actually stop CPU work.
         process = await asyncio.create_subprocess_exec(
             sys.executable,
@@ -20,7 +21,7 @@ class LocalPdfInspector:
                 stdout, _ = await process.communicate(content)
             if process.returncode != 0:
                 raise PdfUnreadable(field="file")
-            return int(stdout)
+            return json.loads(stdout)
         except TimeoutError as e:
             raise ProcessingTimeout(field="file") from e
         finally:

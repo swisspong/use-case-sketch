@@ -13,8 +13,8 @@ from app.modules.text_quality.rules import check_thresholds
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("min_thai_percent", 65.5),
-        ("min_thai_percent", -1),
+        ("max_thai_percent", 65.5),
+        ("max_thai_percent", -1),
         ("max_garbled_thai_percent", 101),
         ("min_text_chars", -1),
         ("min_text_chars", 0.1),
@@ -29,12 +29,12 @@ def test_threshold_rules_are_pure(field, value):
 
 async def test_database_rejects_bad_thresholds_and_multiple_rows(session):
     fields = {
-        "min_thai_percent": 50,
+        "max_thai_percent": 50,
         "max_garbled_thai_percent": 5,
         "min_text_chars": 50,
         "max_image_percent": 80,
     }
-    for changes in [{"id": 2}, {"min_thai_percent": 101}, {"min_text_chars": -1}]:
+    for changes in [{"id": 2}, {"max_thai_percent": 101}, {"min_text_chars": -1}]:
         with pytest.raises(IntegrityError):
             async with session.begin_nested():
                 session.add(TextQualityThresholds(**({"id": 1} | fields | changes)))

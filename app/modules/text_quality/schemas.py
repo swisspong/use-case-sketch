@@ -6,7 +6,7 @@ from app.modules.text_quality.models import Thresholds
 
 
 class ThresholdValues(BaseModel):
-    min_thai_percent: int
+    max_thai_percent: int
     max_garbled_thai_percent: int
     min_text_chars: int
     max_image_percent: int

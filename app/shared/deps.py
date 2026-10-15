@@ -63,3 +63,18 @@ PdfInspectorDep = Annotated[PdfInspector, Depends(get_pdf_inspector)]
 # Adapter deps, one per external client, e.g.:
 # def get_ocr(res: ResDep) -> TextExtractor: return res.ocr
 # OcrDep = Annotated[TextExtractor, Depends(get_ocr)]
+
+
+async def get_document_thresholds(
+    session: SessionDep, settings: SettingsDep
+) -> dict[str, int]:
+    # Wiring between independent modules; the document owns a plain-value snapshot.
+    from dataclasses import asdict
+
+    from app.modules.text_quality.models import Thresholds
+    from app.modules.text_quality.repository import ThresholdsRepo
+
+    return asdict(await ThresholdsRepo(session).get() or Thresholds.defaults(settings))
+
+
+DocumentThresholdsDep = Annotated[dict[str, int], Depends(get_document_thresholds)]

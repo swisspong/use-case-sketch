@@ -1,7 +1,7 @@
 import pytest
 
 DEFAULTS = {
-    "min_thai_percent": 50,
+    "max_thai_percent": 50,
     "max_garbled_thai_percent": 5,
     "min_text_chars": 50,
     "max_image_percent": 80,
@@ -12,12 +12,12 @@ async def test_defaults_and_partial_updates_are_global_and_persistent(client):
     r = await client.get("/text-quality/thresholds")
     assert r.status_code == 200
     assert r.json() == DEFAULTS | {"defaults": DEFAULTS}
-    r = await client.patch("/text-quality/thresholds", json={"min_thai_percent": 65.0})
+    r = await client.patch("/text-quality/thresholds", json={"max_thai_percent": 65.0})
     assert r.status_code == 200
-    assert r.json() == DEFAULTS | {"min_thai_percent": 65, "defaults": DEFAULTS}
+    assert r.json() == DEFAULTS | {"max_thai_percent": 65, "defaults": DEFAULTS}
     r = await client.patch("/text-quality/thresholds", json={"min_text_chars": 0})
     expected = DEFAULTS | {
-        "min_thai_percent": 65,
+        "max_thai_percent": 65,
         "min_text_chars": 0,
         "defaults": DEFAULTS,
     }
@@ -29,8 +29,8 @@ async def test_defaults_and_partial_updates_are_global_and_persistent(client):
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("min_thai_percent", -1),
-        ("min_thai_percent", 65.5),
+        ("max_thai_percent", -1),
+        ("max_thai_percent", 65.5),
         ("max_garbled_thai_percent", 101),
         ("min_text_chars", -1),
         ("min_text_chars", 1.5),
@@ -54,10 +54,11 @@ async def test_invalid_value_is_field_error_and_does_not_save(client, field, val
     "body",
     [
         {"min_text_chars": None},
-        {"min_thai_percent": "65"},
+        {"max_thai_percent": "65"},
         {"max_image_percent": True},
         {"defaults": {}},
         {"extra": 1},
+        {"min_thai_percent": 50},
     ],
 )
 async def test_bad_request_shape_uses_request_error(client, body):

@@ -17,7 +17,7 @@ from app.shared.deps import SessionDep, SettingsDep
 
 class UpdateThresholdsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    min_thai_percent: StrictInt | StrictFloat = 50
+    max_thai_percent: StrictInt | StrictFloat = 50
     max_garbled_thai_percent: StrictInt | StrictFloat = 5
     min_text_chars: StrictInt | StrictFloat = 50
     max_image_percent: StrictInt | StrictFloat = 80

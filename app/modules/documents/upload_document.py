@@ -1,8 +1,9 @@
-"""Validate and atomically store one original PDF plus metadata (round one).
+"""Extract and assess every PDF page, then atomically save originals and results.
 SPEC
 - [x] Reject non-PDF content, oversized, multiple, encrypted and broken PDFs.
-- [x] Count pages before saving; parsing timeout/cancellation saves nothing.
-- [x] Save original bytes and metadata together; quality remains explicitly not checked.
+- [x] Extract text and image coverage per page; parsing timeout/cancellation saves nothing.
+- [x] Save original bytes, metadata, thresholds snapshot and page results atomically.
+- [x] Changing Settings affects future uploads, leaving saved assessments unchanged.
 """
 
 import asyncio
@@ -16,8 +17,14 @@ from app.modules.documents.errors import FileTooLarge, NotPdf, TooManyFiles
 from app.modules.documents.models import Document
 from app.modules.documents.ports import PdfInspector
 from app.modules.documents.repository import DocumentRepo
+from app.modules.documents.rules import assess_quality
 from app.modules.documents.schemas import DocumentSummary, UploadResult
-from app.shared.deps import PdfInspectorDep, SessionDep, SettingsDep
+from app.shared.deps import (
+    DocumentThresholdsDep,
+    PdfInspectorDep,
+    SessionDep,
+    SettingsDep,
+)
 from app.shared.errors import Invalid
 
 
@@ -28,13 +35,21 @@ async def upload_document(
     inspector: PdfInspector,
     max_bytes: int,
     timeout: float,
+    thresholds: dict[str, int],
 ) -> UploadResult:
     start = time.monotonic()
     if len(content) > max_bytes:
         raise FileTooLarge(field="file")
     if not content.startswith(b"%PDF-"):
         raise NotPdf(field="file")
-    pages = await inspector.page_count(content, timeout)
+    pages = await inspector.extract_pages(content, timeout)
+    assessed = [
+        {
+            "text": p["text"],
+            "quality": assess_quality(p["text"], p["image_percent"], thresholds),
+        }
+        for p in pages
+    ]
     filename = filename.replace("\\", "/").split("/")[-1]
     filename = (
         "".join(c for c in filename if c.isprintable()).strip()[:255] or "document.pdf"
@@ -43,10 +58,13 @@ async def upload_document(
         Document(
             filename=filename,
             size_bytes=len(content),
-            page_count=pages,
+            page_count=len(pages),
+            thresholds=thresholds,
+            ocr_suggested_count=sum(not p["quality"]["passed"] for p in assessed),
             original_pdf=content,
         )
     )
+    await repo.add_pages(document.id, assessed)
     return UploadResult(
         document=DocumentSummary.model_validate(document),
         duration_ms=round((time.monotonic() - start) * 1000),
@@ -62,6 +80,7 @@ async def upload_document_endpoint(
     session: SessionDep,
     settings: SettingsDep,
     inspector: PdfInspectorDep,
+    thresholds: DocumentThresholdsDep,
 ) -> UploadResult:
     try:
         async with request.form(max_files=1, max_fields=0) as form:
@@ -77,6 +96,7 @@ async def upload_document_endpoint(
                     inspector,
                     settings.documents_max_bytes,
                     settings.documents_parse_timeout_seconds,
+                    thresholds,
                 )
             )
 

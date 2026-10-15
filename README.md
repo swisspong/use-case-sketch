@@ -35,23 +35,32 @@ Individual commands: `make dev-db`, `make dev-migrate`, `make dev-backend`, `mak
 
 This is a fresh Settings backend with a new initial migration. Use an empty database, rather than an old per-user prototype database. The historical `backend/` document-processing experiments are independent of the running `app/` API.
 
-## Documents — round one
+## Documents — extraction and quality
 
-Open `/documents`, or choose เอกสาร in the sidebar. `/settings` opens Settings; `/` keeps the existing Settings entry point. Frontend hosting must serve `index.html` for these client paths, including `/documents/:id`.
+Open `/documents` to upload a PDF, or choose เอกสาร in the sidebar. New uploads
+extract text and assess all four quality criteria per page before saving. The list
+shows how many pages are recommended for OCR. Open `/documents/:id` to view the PDF,
+page thumbnails, saved text and quality results. Page navigation, zoom, copy and
+shareable `?page=n` links are supported.
 
-- Select or drop one PDF (up to 20 MiB), then explicitly press อัปโหลด. The server verifies PDF content, rejects damaged/encrypted/empty PDFs, and counts pages.
-- Originals and metadata are stored atomically in PostgreSQL. Lists and metadata queries do not load PDF bytes. Documents remain available after refresh/restart when the database volume is retained.
-- The list supports newest-first pagination, loading, empty and retry states. Click the filename or row to open persistent document details, then open the exact original PDF.
-- Upload failures clear the selected file and progress; no automatic POST retry. Parsing runs in a subprocess that is killed on timeout or request cancellation. Disconnects before completion roll back storage.
-- This round deliberately stops before text extraction, quality assessment and OCR. `quality_status: "not_checked"` and `ocr_suggested_count: null` represent that state; the UI never presents it as passed. The full Penpot upload contract's extraction/quality snapshot and per-page results remain for round two.
+Thresholds are snapshotted at upload time: changing Settings affects future uploads.
+The original, metadata and page results are stored atomically in Postgres. Parsing
+runs in a subprocess with a deadline and cancellation cleanup. Upload failures clear
+the selection; retry requires an explicit new upload.
 
-API: `GET /documents?page=1&page_size=20`, `POST /documents` (multipart `file`), `GET /documents/{id}`, and `GET /documents/{id}/original`. Vite proxies them under `/api`. See [the scope and design notes](docs/documents-round-one.md).
+Older documents remain accessible and are explicitly shown as not assessed; upload
+again to obtain page results. OCR execution and comparison are the next increment.
 
-The additive `20261015_documents` migration preserves existing Settings data. `make dev` applies it automatically; use `make dev-migrate` if starting the API separately. PDF support adds `pypdf` and `python-multipart` to the project dependencies.
+`make dev` applies document migrations through `20261015_thai_max` automatically.
+If starting the API separately, run `make dev-migrate` first. See
+[round-two behavior and metric definitions](docs/documents-round-two.md) and the
+[historical first increment](docs/documents-round-one.md).
 
 ## Settings behavior
 
 - Four global quality thresholds: integer percentages 0–100, and a nonnegative character count. Defaults come from server settings. PATCH sends only changed fields.
+- Suggest OCR when any percentage exceeds its maximum (Thai, garbled text, image area), or text count falls below its minimum. Equality passes. The Thai field is `max_thai_percent`; the ops default is `TEXT_QUALITY_DEFAULT_MAX_THAI_PERCENT`.
+- Garbled-text detection now uses the historical backend v3 rules, including Latin substitutions, conflicting Thai marks and spaces splitting incomplete syllables. Existing document assessments retain their original rules and results.
 - Global OpenAI-compatible model presets: add, edit, delete, case-insensitive unique names, and exactly one default while presets exist. Deleting default promotes the newest remaining preset.
 - API keys are encrypted before storage and are never returned. Blank API key in the edit dialog preserves the existing key.
 - Connection tests use a single minimal chat-completion request with a 10-second total timeout. Testing a saved preset closes the database transaction before contacting the provider. Testing is optional and never saves credentials or overrides.

@@ -43,6 +43,6 @@ async def test_uow_factory_commits_each_block_and_rolls_back_on_error(database_u
 async def test_uow_fixture_gives_a_repo_per_block(uow):
     make = uow(ThresholdsRepo)
     async with make() as repo:
-        await repo.save_changes({"min_thai_percent": 70}, initial=Thresholds(50, 5, min_text_chars=50, max_image_percent=80))
+        await repo.save_changes({"max_thai_percent": 70}, initial=Thresholds(50, 5, min_text_chars=50, max_image_percent=80))
     async with make() as repo:
-        assert (await repo.get()).min_thai_percent == 70
+        assert (await repo.get()).max_thai_percent == 70

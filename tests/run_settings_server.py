@@ -25,7 +25,7 @@ def main():
         env = os.environ | {
             "DATABASE_URL": pg.get_connection_url(),
             "LLM_CONFIG_API_KEY_SECRET": "browser-test-only-key-not-for-production",
-            "TEXT_QUALITY_DEFAULT_MIN_THAI_PERCENT": "43",
+            "TEXT_QUALITY_DEFAULT_MAX_THAI_PERCENT": "43",
             "TEXT_QUALITY_DEFAULT_MAX_GARBLED_THAI_PERCENT": "7",
             "TEXT_QUALITY_DEFAULT_MIN_TEXT_CHARS": "64",
             "TEXT_QUALITY_DEFAULT_MAX_IMAGE_PERCENT": "81",

@@ -1,6 +1,6 @@
 """Open saved document metadata and original PDF.
 SPEC
-- [x] Metadata and exact original bytes can be read by id; missing ids return DOC_005.
+- [x] Metadata and exact original bytes can be read by id; missing ids return DOC_007.
 """
 
 import uuid
@@ -11,7 +11,7 @@ from fastapi import APIRouter, Response
 from app.modules.documents.errors import DocumentNotFound
 from app.modules.documents.models import Document
 from app.modules.documents.repository import DocumentRepo
-from app.modules.documents.schemas import DocumentSummary
+from app.modules.documents.schemas import DocumentDetail, DocumentSummary
 from app.shared.deps import SessionDep
 
 
@@ -35,15 +35,19 @@ async def get_original(
 router = APIRouter()
 
 
-@router.get("/documents/{document_id}", response_model=DocumentSummary)
+@router.get("/documents/{document_id}", response_model=DocumentDetail)
 async def get_document_endpoint(
     document_id: uuid.UUID, session: SessionDep
-) -> DocumentSummary:
-    return DocumentSummary.model_validate(
-        await get_document(document_id, DocumentRepo(session))
+) -> DocumentDetail:
+    repo = DocumentRepo(session)
+    document = await get_document(document_id, repo)
+    return DocumentDetail(
+        **DocumentSummary.model_validate(document).model_dump(),
+        pages=await repo.page_summaries(document_id),
     )
 
 
+@router.get("/documents/{document_id}/file", response_class=Response)
 @router.get("/documents/{document_id}/original", response_class=Response)
 async def get_original_endpoint(
     document_id: uuid.UUID, session: SessionDep

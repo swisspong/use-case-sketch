@@ -1,4 +1,7 @@
-# Documents: round one
+# Documents: round one (historical)
+
+The following describes the initial increment. See [round two](documents-round-two.md)
+for the current extraction, quality and detail workspace behavior.
 
 Scope: upload a real PDF, retain it after refresh, list documents and open basic details by id. Text extraction, per-page quality results, settings snapshots and OCR belong to subsequent rounds.
 

@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import func, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.documents.models import Document
+from app.modules.documents.models import Document, DocumentPage
 
 
 class DocumentRepo:
@@ -45,3 +45,47 @@ class DocumentRepo:
         return await self._session.scalar(
             select(Document.original_pdf).where(Document.id == document_id)
         )
+
+    async def add_pages(self, document_id: uuid.UUID, pages: list[dict]) -> None:
+        self._session.add_all(
+            [
+                DocumentPage(
+                    document_id=document_id,
+                    number=n,
+                    text=p["text"],
+                    quality=p["quality"],
+                )
+                for n, p in enumerate(pages, 1)
+            ]
+        )
+        await self._session.flush()
+
+    async def page_summaries(self, document_id: uuid.UUID) -> list[dict]:
+        pages = (
+            await self._session.scalars(
+                select(DocumentPage)
+                .where(DocumentPage.document_id == document_id)
+                .order_by(DocumentPage.number)
+            )
+        ).all()
+        return [
+            {
+                "number": p.number,
+                "ocr_suggested": not p.quality["passed"],
+                "has_ocr": False,
+                "text_passed": p.quality["passed"],
+            }
+            for p in pages
+        ]
+
+    async def get_page(self, document_id: uuid.UUID, number: int) -> dict | None:
+        from sqlalchemy.orm import undefer
+
+        page = await self._session.scalar(
+            select(DocumentPage)
+            .options(undefer(DocumentPage.text))
+            .where(
+                DocumentPage.document_id == document_id, DocumentPage.number == number
+            )
+        )
+        return {"text": page.text, "quality": page.quality} if page else None
