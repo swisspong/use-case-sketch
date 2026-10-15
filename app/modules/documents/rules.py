@@ -82,3 +82,51 @@ def same_content(plain: str, structured: str) -> bool:
             return False
         dropped = []
     return True
+
+
+# <br> and HTML table tags end a line or cell; inline tags only wrap text.
+_BREAK_TAG = re.compile(
+    r"</?(?:br|table|thead|tbody|tfoot|tr|td|th)\b[^>]*>", re.IGNORECASE
+)
+_INLINE_TAG = re.compile(r"</?(?:sup|sub|b|strong|i|em|u|p|span)\s*/?>", re.IGNORECASE)
+_TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
+_SEPARATOR_CELL = re.compile(r"^:?-+:?$")
+
+
+def strip_markup(text: str) -> str:
+    """Turn markup a plain transcription should not contain back into plain lines.
+    <br> and HTML table tags end a line, simple inline tags are removed but their text
+    stays, and pipe-table cells become one line each without separator cells. Tables
+    nested in a cell are flattened the same way. Blank lines are dropped, because tags and
+    their indentation leave many. Text without markup is returned unchanged."""
+    if not (
+        _BREAK_TAG.search(text)
+        or _INLINE_TAG.search(text)
+        or any(_TABLE_ROW.match(line) for line in text.splitlines())
+    ):
+        return text
+    plain = _INLINE_TAG.sub("", _BREAK_TAG.sub("\n", text))
+    lines = []
+    for line in plain.splitlines():
+        cells = [cell.strip() for cell in line.split("|")]
+        lines.extend(c for c in cells if c and not _SEPARATOR_CELL.match(c))
+    return "\n".join(lines)
+
+
+def repair_tables(text: str) -> str:
+    """Insert the separator row a Markdown pipe table needs after its header row when it
+    is missing. Cell text is never changed."""
+    lines = text.splitlines()
+    repaired = []
+    for i, line in enumerate(lines):
+        repaired.append(line)
+        starts_table = _TABLE_ROW.match(line) and not (
+            i > 0 and _TABLE_ROW.match(lines[i - 1])
+        )
+        if not starts_table or _SEPARATOR_ROW.match(line):
+            continue
+        following = lines[i + 1] if i + 1 < len(lines) else ""
+        if not _SEPARATOR_ROW.match(following):
+            columns = line.strip().strip("|").count("|") + 1
+            repaired.append("| " + " | ".join(["---"] * columns) + " |")
+    return "\n".join(repaired)

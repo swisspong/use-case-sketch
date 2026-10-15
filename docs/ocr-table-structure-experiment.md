@@ -188,3 +188,101 @@ pages with very small print fail.
 
 Follow-up: if pass 1 returns markup (`|` rows or `<br>`), the fallback still returns
 that markup. This happened in 0/6 runs with base, but the guard could also handle it.
+
+## Experiment 3: guard against pass-1 markup, 2026-10-16
+
+Change: `rules.strip_markup` flattens what pass 1 returns despite "No markdown". `<br>`
+becomes a line break, simple inline tags (`sup`, `b`, …) are removed and their text
+kept, and each pipe-table cell becomes its own line without separator cells. Text without
+markup is returned byte-for-byte. The adapter applies it before pass 2, so both the
+structuring input and the fallback are plain.
+
+Offline, on the 6 experiment-2 runs whose pass 1 had markup: no `<br>`, `|` or `---` was
+left, every checkpoint was unchanged, and `same_content` accepted all 6 recorded pass-2
+outputs. All earlier clean pass-1 texts and the parser text came back unchanged.
+
+Live, on the table page with the variants that triggered markup (3 pdf and 3 zoom runs,
+2 at a time):
+
+| Run | Pass 1 had markup | Pass 2 | Final | Checkpoints |
+|---|---|---|---|---|
+| pdf 1 | yes | cut off (`finish_reason=length`) | flattened pass 1, clean | 8/8 |
+| pdf 2 | yes | accepted | structured | 7/8 (๒๕๔๖→๒๕๕๖ in pass 1) |
+| pdf 3 | no | accepted | structured | 8/8 |
+| zoom 1 | no | cut off (`finish_reason=length`) | pass 1, clean | 8/8 |
+| zoom 2 | no | accepted | structured | 8/8 |
+| zoom 3 | yes | accepted | structured | 8/8 |
+
+- The final text never contained `<br>` or broken pipe rows (0/6, compared with 6/12 in
+  experiment 2 for pdf and zoom).
+- New finding: pass 2 can run out of `max_tokens` (8192) on reasoning. In both cut-off
+  runs it spent about 7,860 reasoning tokens and only about 330 on output. Restructuring
+  needs no deep reasoning, so pass 2 could use a low reasoning effort or a larger
+  `max_tokens`. That would likely also cut its ~25–40 s latency (not yet tested).
+- pdf input misread ๒๕๔๖ as ๒๕๕๖ again (2 of 6 pdf runs overall). base never did.
+
+## Experiment 4: pass 2 with `reasoning_effort: "low"`, 2026-10-16
+
+The proxy accepts `reasoning_effort`. Single pass-2 probe on the same recorded
+transcription:
+
+| Effort | Pass 2 time | Reasoning tokens | Output tokens | Pipe rows |
+|---|---|---|---|---|
+| default | 29.1 s | 3023 | 4171 | 9 |
+| none | 18.8 s | — | 1142 | 8 (separator missing) |
+| minimal | 21.5 s | — | 1148 | 9 |
+| low | 28.3 s | — | 1142 | 8 (separator missing) |
+| medium | 37.4 s | 3607 | 4755 | 9 |
+
+Production input (base: PNG 2000 px), pass 1 unchanged, pass 2 with `low`, 3 runs per
+page, 2 at a time. It is compared with the experiment-2 base runs (default effort):
+
+| | Default effort | Pass 2 `low` |
+|---|---|---|
+| Pass 2 time | 22.1–45.7 s | **6.5–11.5 s** |
+| Total time | 36.7–74.7 s (avg 47.7) | **17.3–30.8 s (avg 25.0)** |
+| Pass 2 reasoning tokens | 2689–4060 | none |
+| Pass 2 accepted by the guard | 6/6 | 5/6¹ |
+| Data tables well formed (header + separator, equal columns) | 3/3 | **1/2**² |
+| Checkpoints | 62/63 | 62/63 (๔,๙๔๖→๔,๙๔๐ again, pass 1) |
+
+¹ The rejected run is a pass-1 problem, not pass 2: pass 1 returned an HTML `<table>`.
+`strip_markup` now also flattens HTML table tags (`table`, `tr`, `td`, `th`, …, with
+attributes), and drops blank lines in markup mode. Re-checked offline, that run's pass 2
+would be accepted. All 10 recorded pass-1 outputs with markup flatten cleanly, with
+checkpoints unchanged.
+² Without reasoning, pass 2 sometimes omits the `| --- |` separator row (1 of 2 table
+runs and 2 of 3 non-reasoning probes). The text is unchanged, so the guard accepts it, but
+the result is not a valid Markdown table.
+
+### Findings
+
+- `low` halves the total time, and pass 2 no longer risks running out of `max_tokens` on
+  reasoning (experiment 3).
+- Structure quality drops: separator rows go missing. Adopting `low` needs a
+  deterministic repair (insert the separator row after a table's first row), or a guard
+  that rejects malformed tables. `minimal` kept the separator in 1/1 probe, which is too
+  few to rely on.
+
+## Experiment 5: final adapter (pass 2 `low` + `repair_tables`), 2026-10-16
+
+Change: pass 2 sends `reasoning_effort: "low"`, and `rules.repair_tables` inserts a
+missing separator row after a pipe table's header. Cell text is never touched. Offline,
+the repair fixed the one malformed experiment-4 table and left the 19 other accepted
+outputs byte-identical.
+
+Live, with the production `OpenAIOcrReader` and its 90 s deadline, 2 runs at a time:
+
+| Run | Pass 1 | Pass 2 (`low`) | Total | Structure | Tables well formed | Checkpoints |
+|---|---|---|---|---|---|---|
+| table 1 | 18.0 s | 11.7 s | 29.7 s | yes | 1/1 | 8/8 |
+| table 2 | 30.4 s | 10.8 s | 41.2 s | yes | 1/1 | 8/8 |
+| super 1 | 14.1 s | 7.3 s | 21.4 s | yes (labelled frame) | — | 13/13 |
+| super 2 | 13.4 s | 9.8 s | 23.3 s | yes (labelled frame) | — | 13/13 |
+
+Round 3 could not run. The preset's API key hit its spending cap (`429 budget_exceeded`,
+$5.00). Until the budget is raised, every OCR request returns `provider_error`.
+
+Note: a provider that does not support `reasoning_effort` and rejects it would fail pass
+2 every time. OCR would still return plain text, but with no tables. The LiteLLM →
+Vertex Gemini preset accepts it.

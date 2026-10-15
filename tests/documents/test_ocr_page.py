@@ -432,6 +432,8 @@ async def broken(request):
     "second,expected",
     [
         (answer(TABLE_PAGE), TABLE_PAGE),
+        # Low reasoning effort can drop the separator row: it is put back.
+        (answer(TABLE_PAGE.replace("\n| --- | --- |", "")), TABLE_PAGE),
         # Structuring changed a digit (seen with real models): keep the transcription.
         (answer(TABLE_PAGE.replace("๗๒", "๓๒")), PLAIN_PAGE),
         (answer(TABLE_PAGE + "<br>"), PLAIN_PAGE),
@@ -452,12 +454,35 @@ async def test_ocr_adapter_structures_tables_only_when_text_is_unchanged(
     finally:
         await reader.aclose()
     assert len(calls) == 2
+    assert "reasoning_effort" not in calls[0]  # transcription keeps the model default
+    assert calls[1]["reasoning_effort"] == "low"
     layout = calls[1]["messages"]
     assert layout[0]["content"] == LAYOUT_PROMPT
     assert layout[1]["content"][0]["text"] == "Transcription:\n" + PLAIN_PAGE
     assert (
         layout[1]["content"][1] == calls[0]["messages"][1]["content"][1]
     )  # same image
+
+
+async def test_ocr_adapter_flattens_pass_one_markup_before_structuring():
+    markup = "| วาระที่ | มติที่ประชุม/ข้อสั่งการ |<br>|---|---|<br>| | ฝ่ายเลขานุการ |"
+    flat = "วาระที่\nมติที่ประชุม/ข้อสั่งการ\nฝ่ายเลขานุการ"
+    calls = []
+
+    async def handler(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        if body["messages"][0]["content"] == PROMPT:
+            return httpx.Response(200, json=completion(markup))
+        return httpx.Response(503, json={})
+
+    reader = OpenAIOcrReader(timeout=5, transport=httpx.MockTransport(handler))
+    try:
+        # Pass 2 failed, so the fallback is the flattened transcription, not the markup.
+        assert await reader.read(b"\x89PNG", PRESET) == OcrReading(text=flat)
+    finally:
+        await reader.aclose()
+    assert calls[1]["messages"][1]["content"][0]["text"] == "Transcription:\n" + flat
 
 
 async def test_page_renderer_renders_requested_page_as_png():

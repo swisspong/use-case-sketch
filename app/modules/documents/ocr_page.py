@@ -9,6 +9,10 @@ SPEC
 - [x] Provider timeout/error/invalid output -> 200 status=failed + reason; previous OCR kept.
 - [x] OCR text keeps table structure (Markdown pipe tables, labelled layout-frame blocks)
       only when the structuring pass leaves the transcribed text unchanged (adapter).
+- [x] Markup that the transcription pass returns anyway (pipe or HTML tables, <br>, inline tags) is
+      flattened to plain lines before structuring and in the fallback (adapter).
+- [x] The structuring pass runs with reasoning_effort "low"; a table missing its separator
+      row is repaired without touching cell text (adapter).
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).
 """
 

@@ -3,9 +3,11 @@
 Two passes share one total deadline. Pass 1 transcribes plain text. Pass 2 sends the image
 and that text back, and asks only for structure: Markdown pipe tables for data tables and
 labelled blocks for layout frames. Pass 2 is kept only when its words and numbers match
-pass 1 exactly. Otherwise the plain transcription is returned. One model call that both
-reads and structures misreads digits (๗๒.๙๐ -> ๓๒.๙๐), so the passes stay separate
-(docs/ocr-table-structure-experiment.md).
+pass 1 exactly. Otherwise the plain transcription is returned. Markup that pass 1 returns
+anyway (pipe or HTML tables, <br> and similar tags) is removed first. Pass 2 runs with
+reasoning_effort "low", and a missing table separator row is repaired. One model call
+that both reads and structures misreads digits (๗๒.๙๐ -> ๓๒.๙๐), so the passes stay
+separate (docs/ocr-table-structure-experiment.md).
 
 No automatic retries: the action is synchronous and the user retries explicitly (Penpot
 spec). Every pass-1 failure becomes an OcrReading reason. Messages never include provider
@@ -18,7 +20,7 @@ import base64
 import httpx
 
 from app.modules.documents.ports import OcrPreset, OcrReading
-from app.modules.documents.rules import same_content
+from app.modules.documents.rules import repair_tables, same_content, strip_markup
 
 PROMPT = (
     "You are an OCR engine for scanned document pages, mostly Thai and English. "
@@ -78,6 +80,8 @@ class OpenAIOcrReader:
             return OcrReading(reason="provider_timeout")
         except _Failed as e:
             return OcrReading(reason=e.reason)
+        # Pass 1 sometimes ignores "No markdown" (pipe tables with <br> cells).
+        plain = strip_markup(plain)
         if not plain:
             return OcrReading(text=plain)
         # Structure is optional: any pass-2 failure keeps the plain transcription.
@@ -87,12 +91,25 @@ class OpenAIOcrReader:
                     preset,
                     LAYOUT_PROMPT,
                     [{"type": "text", "text": "Transcription:\n" + plain}, picture],
+                    # Re-layout needs no deep reasoning: low effort halves the time and
+                    # stops reasoning from using up max_tokens. It sometimes drops a
+                    # table's separator row, which repair_tables puts back.
+                    reasoning_effort="low",
                 )
         except (TimeoutError, _Failed):
             return OcrReading(text=plain)
-        return OcrReading(text=structured if same_content(plain, structured) else plain)
+        if not same_content(plain, structured):
+            return OcrReading(text=plain)
+        return OcrReading(text=repair_tables(structured))
 
-    async def _complete(self, preset: OcrPreset, system: str, user: list) -> str:
+    async def _complete(
+        self,
+        preset: OcrPreset,
+        system: str,
+        user: list,
+        reasoning_effort: str | None = None,
+    ) -> str:
+        options = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
         try:
             response = await self._client.post(
                 preset.base_url.rstrip("/") + "/chat/completions",
@@ -100,6 +117,7 @@ class OpenAIOcrReader:
                 json={
                     "model": preset.model_id,
                     "max_tokens": self._max_tokens,
+                    **options,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},

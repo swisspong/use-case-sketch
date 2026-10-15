@@ -35,7 +35,8 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
   sharing the total deadline `DOCUMENTS_OCR_TIMEOUT_SECONDS` (90; the frontend waits 130 s). Pass 1 transcribes
   plain text. Pass 2 restructures that text into Markdown pipe tables and labelled
   layout-frame blocks. It is kept only when `rules.same_content` confirms the text is
-  unchanged; otherwise pass 1 is returned
+  unchanged; otherwise pass 1 is returned. Pass 2 uses `reasoning_effort: "low"`, and
+  a missing table separator row is repaired; markup in pass 1 is flattened first
   (see `docs/ocr-table-structure-experiment.md`). No automatic retries, because the user
   retries explicitly. A truncated reply (`finish_reason=length`) or a malformed reply in
   pass 1 is `invalid_output`. Credentials and provider text are never logged.
