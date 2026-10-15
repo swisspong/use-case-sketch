@@ -1,4 +1,16 @@
+import asyncio
+
 from app.modules.llm_config.ports import ConnectionResult
+
+
+class WaitingPdfInspector:
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def page_count(self, content: bytes, timeout: float) -> int:
+        self.started.set()
+        await asyncio.Future()
+        return 1
 
 class FakeConnectionProbe:
     def __init__(self, result: ConnectionResult, before_call=lambda:None):

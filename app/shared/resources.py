@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from app.modules.documents.adapters.pdf_inspector import LocalPdfInspector
 from app.modules.llm_config.adapters.openai_http import OpenAIConnectionProbe
 from app.shared.config import Settings
 
@@ -25,6 +26,7 @@ class Resources:
     engine: AsyncEngine
     sessionmaker: async_sessionmaker[AsyncSession]
     connection_probe: OpenAIConnectionProbe
+    pdf_inspector: LocalPdfInspector
     # <adapter fields go here>, e.g. ocr: HttpOcrClient
 
     async def aclose(self) -> None:
@@ -39,6 +41,7 @@ def build_resources(settings: Settings) -> Resources:
         engine=engine,
         sessionmaker=async_sessionmaker(engine, expire_on_commit=False),
         connection_probe=OpenAIConnectionProbe(),
+        pdf_inspector=LocalPdfInspector(),
     )
 
 

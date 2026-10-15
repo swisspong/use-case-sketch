@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     text_quality_default_max_image_percent: int = Field(default=80, ge=0, le=100)
     # llm_config: encrypts saved API keys. Changing it makes existing keys unreadable.
     llm_config_api_key_secret: str = "change-me-to-a-long-random-secret-for-api-keys"
+    documents_max_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    documents_parse_timeout_seconds: float = Field(default=30, gt=0)
 
 
 @lru_cache

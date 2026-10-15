@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.documents.ports import PdfInspector
 from app.modules.llm_config.ports import ConnectionProbe, PresetUow
 from app.modules.llm_config.repository import PresetRepo
 from app.shared.config import Settings, get_settings
@@ -51,6 +52,13 @@ def get_preset_uow(res: ResDep) -> PresetUow:
 
 
 PresetUowDep = Annotated[PresetUow, Depends(get_preset_uow)]
+
+
+def get_pdf_inspector(res: ResDep) -> PdfInspector:
+    return res.pdf_inspector
+
+
+PdfInspectorDep = Annotated[PdfInspector, Depends(get_pdf_inspector)]
 
 # Adapter deps, one per external client, e.g.:
 # def get_ocr(res: ResDep) -> TextExtractor: return res.ocr

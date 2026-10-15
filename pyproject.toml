@@ -13,6 +13,8 @@ dependencies = [
   "httpx",
   "celery[redis]",
   "cryptography",
+    "pypdf>=6",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]
@@ -31,8 +33,10 @@ include_external_packages = true  # needed to forbid sqlalchemy below
 [[tool.importlinter.contracts]]
 name = "Modules are independent"
 type = "independence"
-modules = ["app.modules.text_quality", "app.modules.llm_config"]  # one entry per module, e.g. "app.modules.knowledge"
+modules = ["app.modules.text_quality", "app.modules.llm_config", "app.modules.documents"]
 ignore_imports = [
+  "app.shared.deps -> app.modules.documents.ports",
+  "app.shared.resources -> app.modules.documents.adapters.pdf_inspector",
   "app.shared.deps -> app.modules.llm_config.repository",
   "app.shared.deps -> app.modules.llm_config.ports",
   "app.shared.resources -> app.modules.llm_config.adapters.openai_http",
