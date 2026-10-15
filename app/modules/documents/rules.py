@@ -170,3 +170,44 @@ def drop_empty_labels(plain: str, structured: str) -> str:
                 empty.add((i, label))
     drop = {i for i, label in empty if label in used}
     return "\n".join(line for i, line in enumerate(lines) if i not in drop)
+
+
+_EDIT_MARK = re.compile(r"(~~|\+\+)")
+
+
+def apply_edit_marks(
+    text: str, marked: str, struck: int, underlined: int
+) -> str | None:
+    """Copy the ~~struck~~ / ++underlined++ marks of the mark pass onto text.
+
+    The marks are kept only when there is exactly one pair per detected line of each kind
+    and removing them gives back the text (whitespace ignored); otherwise None. They are
+    re-inserted into text itself, so its spacing and tables are untouched. Runs split
+    only by whitespace (one struck passage over several lines) are joined."""
+    if _EDIT_MARK.search(text):
+        return None
+    if marked.count("~~") != 2 * struck or marked.count("++") != 2 * underlined:
+        return None
+    if re.sub(r"\s", "", _EDIT_MARK.sub("", marked)) != re.sub(r"\s", "", text):
+        return None
+    out, i, is_open = [], 0, {"~~": False, "++": False}
+    for part in _EDIT_MARK.split(marked):
+        if part in is_open:
+            if not is_open[part]:  # an opening mark goes right before the next word
+                while i < len(text) and text[i].isspace():
+                    out.append(text[i])
+                    i += 1
+            out.append(part)
+            is_open[part] = not is_open[part]
+            continue
+        for ch in part:
+            if ch.isspace():
+                continue
+            while text[i].isspace():
+                out.append(text[i])
+                i += 1
+            out.append(text[i])
+            i += 1
+    out.append(text[i:])
+    joined = re.sub(r"~~(\s*)~~", r"\1", "".join(out))
+    return re.sub(r"\+\+(\s*)\+\+", r"\1", joined)

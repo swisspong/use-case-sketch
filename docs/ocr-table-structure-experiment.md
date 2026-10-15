@@ -448,3 +448,119 @@ as in `C++`, is page text and stays. Checked on every recorded output that has m
 no `~~` or `++` is left, and nothing else changes unless the text also holds table
 markup. Pages with track changes still read as plain text, and a warning in the UI
 remains an option (it needs a Penpot design first).
+
+## Experiment 9: pixel line detection + boxed-image mark call, 2026-10-16
+
+Idea: code finds the lines and the LLM only reads the words. LLMs miss thin lines (trials
+1–2), but the lines are easy to find in pixels.
+
+### Detector (prototype, pure PIL, ~0.4 s per page at 1416×2000)
+
+1. Find dark horizontal runs of at least w/55 px and merge them over adjacent rows into
+   thin segments (≤ h/450 px thick). Join collinear pieces, because descenders touching
+   a border split it.
+2. Reject a segment if it:
+   - is shorter than w/40 (signature strokes, dashes)
+   - spans ≥ 97% of its cell (page-long vertical borders define the cells)
+   - has no text right above it
+   - ends on a vertical stroke running well above and below (a table corner)
+   - has text above it on less than 75% of its length (a border runs on past the text)
+3. Classify: text right below the line as well means **strike**, otherwise **underline**.
+
+Result: track-changes page **26/26 lines found** (15 strike, 11 underline), with
+correct extents, including `โดย`, `ซึ่งรับรอง`, `รับทราบว่า` and `รายงาน`. Table page and
+superscript page: **0 found**, so no mark call is made. An earlier version without the
+corner, coverage and length rules flagged 21 table borders and a signature stroke on
+those two pages. The thresholds were tuned on these 3 pages only.
+
+Mapping lines onto PDF text-layer character boxes was tried first and failed. This
+file's text layer comes from another OCR tool, and its boxes do not match the image.
+
+### Mark call
+
+The call gets the transcription and the page with red boxes (strike) and blue boxes
+(underline) drawn on it. The prompt states how many boxes there are; it is word for word
+in `prompt_mark_boxes` below. `reasoning_effort: "low"`. Code then checks that removing
+the marks gives back the text (whitespace ignored), and the counts of `~~` and `++` pairs
+against the counts of boxes. Adjacent runs split only by whitespace are merged.
+
+```
+Software has drawn coloured boxes on the page image. Each RED box surrounds text that is
+struck through. Each BLUE box surrounds text that is underlined. There are {red} red and
+{blue} blue boxes. Return the transcription unchanged, character for character, except:
+wrap the text inside each red box in ~~ ~~ and the text inside each blue box in ++ ++.
+Mark all of the text inside a box and nothing outside it. Text without a box is never
+marked.
+```
+
+| Run | Pairs (strike/underline) vs boxes 15/11 | Marks right (of 16) | Mark call | Total |
+|---|---|---|---|---|
+| 1 | 14/11 | 13 | 10.7 s | 88.1 s |
+| 2 | 15/11 | **16** | 10.5 s | 77.6 s |
+| 3 | 15/11 | **16** | 11.5 s | 41.1 s |
+
+The OCR itself was slow on this dense page (29–77 s, 2 runs in parallel).
+
+- Compared with trials 1 and 2 (5–12 of 16), the mark call is accurate and fast
+  (~11 s with low effort).
+- Run 1 misplaced marks: an underline swallowed the struck `ซึ่งรับรอง`, and one strike
+  end landed in the left column. Its strike count was 14 against 15 boxes.
+  **Requiring the pair counts to equal the box counts exactly** would reject run 1
+  (no marks shown), and keep runs 2 and 3 at 16/16.
+- Equal counts do not prove placement. A rough check is still open: the length of each
+  marked run against its box width.
+
+## Experiment 10: edit marks in production code, 2026-10-16
+
+Code added:
+- `adapters/edit_mark_detector.py`: the detector, rewritten on byte rows and a regex. It
+  gives identical lines to the prototype on all 3 pages and runs in 0.05–0.09 s.
+- `rules.apply_edit_marks`: pairs must equal the box counts exactly, and the text must
+  be unchanged. Marks are re-inserted into the original text, so spacing and tables are
+  untouched.
+- Adapter: after structuring, if lines are found and the deadline allows, a mark call
+  runs with `reasoning_effort: "low"`. Any failure leaves the text unmarked.
+
+Offline, on the experiment-9 outputs: run 1 is rejected (14 strike pairs, 15 boxes) and
+runs 2 and 3 are kept at 16/16, with the text byte-identical apart from the marks.
+
+Live, with the production adapter unpatched and a 90 s deadline:
+
+| Run | Calls | Total | Result |
+|---|---|---|---|
+| strike 1 | pass 1 22.4 s, pass 2 14.1 s, mark 11.0 s | 47.9 s | **16/16 marks**, labelled frame |
+| strike 2 | pass 1 48.8 s, pass 2 13.1 s, mark 10.1 s | 72.3 s | **16/16 marks**, labelled frame |
+| table 1 | pass 1, pass 2 (no lines, no mark call) | 25.9 s | 10/10, no marks |
+| super 1 | pass 1, pass 2 (no lines, no mark call) | 40.7 s | 17/18 (๔,๙๔๖ misread in pass 1), no marks |
+
+## Follow-up: page failures, deadline and logging, 2026-10-16
+
+A user OCR of the track-changes page (`39b78908-3a78-4474-9e43-811d8962d564`, preset
+`test`, same model and proxy) came back with no marks. The adapter logged nothing, so
+the cause was rebuilt from re-runs:
+- **Pass 1 time and reasoning vary widely on this page.** Three direct calls took 12, 27
+  and 45 s, with 0, 3,364 and 5,164 reasoning tokens (output ~1,150).
+  - With `max_tokens: 8192`, one re-run was cut off and the **whole page failed**
+    (`invalid_output` after 65 s).
+  - A slow pass 1 plus pass 2 can leave too little of the 90 s deadline for the mark
+    call (~11 s), so it is skipped. This is the likely cause of the user's run.
+- The user's text also read ดอลลาร์ as `ดอลล่าร์` (a pass-1 misread).
+
+Changes:
+- `max_tokens` 8192 → **16384**.
+- `DOCUMENTS_OCR_TIMEOUT_SECONDS` 90 → **110**. The frontend now waits 150 s (110 s OCR,
+  up to 30 s render, then the save).
+- `OcrReading.steps` and `degraded` (both `compare=False`) record what each pass did.
+  `ocr_page` logs one line per OCR, with no provider text: `OCR document=<id> page=<n>
+  preset=<name> ok|failed ms=<n> steps=pass1 ok; pass2 accepted|rejected|deadline|…;
+  marks none found|applied (s+u)|rejected (… marked, … boxes)|deadline|…`. The line is
+  WARNING when the OCR failed or any pass was skipped or rejected, and INFO otherwise.
+  Logging is not configured, so only WARNING lines show in the uvicorn console.
+
+Live re-runs with these changes:
+- Run 1: `pass1 ok; pass2 accepted; marks applied (15+11)`, 64.1 s, 16/16.
+- Run 2: `marks rejected (14+11 marked, 15+11 boxes)`, 32.6 s, so the text was left
+  unmarked.
+
+Across all runs of the final mark call, 2 of 6 were rejected for a missing pair: that
+page got no marks, but never wrong ones.

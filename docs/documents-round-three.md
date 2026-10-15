@@ -32,7 +32,7 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
 - `adapters/page_renderer.py`: PDFium (pypdfium2) in a killable subprocess, 200 dpi, longest
   side ≤ 2000 px, deadline `DOCUMENTS_PARSE_TIMEOUT_SECONDS`. Failure → 500 SYS_002.
 - `adapters/openai_ocr.py`: two Chat Completions requests with the page as a PNG data URL,
-  sharing the total deadline `DOCUMENTS_OCR_TIMEOUT_SECONDS` (90; the frontend waits 130 s). Pass 1 transcribes
+  sharing the total deadline `DOCUMENTS_OCR_TIMEOUT_SECONDS` (110; the frontend waits 150 s). Pass 1 transcribes
   plain text. Pass 2 restructures that text into Markdown pipe tables and labelled
   layout-frame blocks. It is kept only when `rules.same_content` confirms the text is
   unchanged; otherwise pass 1 is returned. Pass 2 uses `reasoning_effort: "low"`, and
@@ -40,6 +40,10 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
   Superscript footnote markers are written `[^n]` (footnotes `[^n]:`), and empty
   labels added by pass 2 are removed. Strike/underline marks (`~~`, `++`) that pass 1
   adds on its own are removed, because they are found too unreliably to keep
+- `adapters/edit_mark_detector.py`: finds struck and underlined text from pixels (no
+  model). When it finds some and time is left before the deadline, a third call marks the
+  boxed words with `~~`/`++` (`reasoning_effort: "low"`). `rules.apply_edit_marks` keeps
+  the marks only with exactly one pair per detected line and the text unchanged
   (see `docs/ocr-table-structure-experiment.md`). No automatic retries, because the user
   retries explicitly. A truncated reply (`finish_reason=length`) or a malformed reply in
   pass 1 is `invalid_output`. Credentials and provider text are never logged.

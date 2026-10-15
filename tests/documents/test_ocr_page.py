@@ -7,6 +7,7 @@ import pytest
 
 from app.modules.documents.adapters.openai_ocr import (
     LAYOUT_PROMPT,
+    MARK_PROMPT,
     PROMPT,
     OpenAIOcrReader,
 )
@@ -37,6 +38,7 @@ from app.shared.deps import (
 from tests.documents.test_documents import THRESHOLDS, pdf
 from tests.documents.test_page_results import text_and_image_pdf
 from tests.fakes import FakeOcrReader, FakePageRenderer
+from tests.helpers import page, words
 from tests.settings.test_presets import DATA, create
 
 # Parser fails on page 2 (empty); a 3-character Latin OCR text passes these thresholds.
@@ -153,6 +155,27 @@ async def test_rerun_replaces_result_and_failure_keeps_previous(
     assert page["ocr"]["text"] == "x"
     detail = (await client.get(f"/documents/{doc.id}")).json()
     assert detail["pages"][1]["has_ocr"] and not detail["pages"][1]["text_passed"]
+
+
+async def test_each_ocr_logs_one_traceable_line(client, session, uow, presets, caplog):
+    await create(client)
+    doc = await seed(session)
+    caplog.set_level("INFO", logger="app.modules.documents.ocr_page")
+    clean = OcrReading(text="Hello OCR", steps=("pass1 ok", "pass2 accepted"))
+    skipped = OcrReading(
+        text="Hello OCR",
+        steps=("pass1 ok", "pass2 accepted", "marks deadline (15+11 boxes)"),
+        degraded=True,
+    )
+    failed = OcrReading(reason="invalid_output", steps=("pass1 invalid_output",))
+    for reading in (clean, skipped, failed):
+        await run(session, uow, presets, doc.id, reader=FakeOcrReader(reading))
+    records = [r for r in caplog.records if r.name == "app.modules.documents.ocr_page"]
+    assert [r.levelname for r in records] == ["INFO", "WARNING", "WARNING"]
+    lines = [r.getMessage() for r in records]
+    assert all(f"document={doc.id} page=2 preset=" in line for line in lines)
+    assert "ok" in lines[1] and "marks deadline (15+11 boxes)" in lines[1]
+    assert "failed" in lines[2] and "pass1 invalid_output" in lines[2]
 
 
 async def test_passing_parser_page_stays_passed_even_if_ocr_fails_quality(
@@ -370,6 +393,7 @@ async def test_ocr_adapter_translates_provider_responses(respond, expected):
         assert request.headers["authorization"] == "Bearer secret"
         body = json.loads(request.content)
         assert body["model"] == "vision"
+        assert body["max_tokens"] == 16384  # reasoning + a dense page fit
         image = body["messages"][-1]["content"][-1]["image_url"]["url"]
         assert image.startswith("data:image/png;base64,")
 
@@ -485,6 +509,107 @@ async def test_ocr_adapter_flattens_pass_one_markup_before_structuring():
     finally:
         await reader.aclose()
     assert calls[1]["messages"][1]["content"][0]["text"] == "Transcription:\n" + flat
+
+
+def struck_page(draw):
+    right = words(draw, 100, 200, 12)
+    draw.rectangle([100, 209, right, 211], fill=0)
+
+
+@pytest.mark.parametrize(
+    "reply,expected",
+    [
+        (
+            "~~วาระที่~~" + PLAIN_PAGE.removeprefix("วาระที่"),
+            "~~วาระที่~~" + PLAIN_PAGE.removeprefix("วาระที่"),
+        ),
+        (PLAIN_PAGE, PLAIN_PAGE),  # the detected line was not marked: nothing is
+        ("~~วาระที่~~ ++มติ++", PLAIN_PAGE),  # text changed: marks discarded
+    ],
+)
+async def test_ocr_adapter_marks_struck_text_only_when_lines_are_found(reply, expected):
+    calls = []
+
+    async def handler(request):
+        body = json.loads(request.content)
+        calls.append(body)
+        system = body["messages"][0]["content"]
+        if system == PROMPT:
+            return httpx.Response(200, json=completion(PLAIN_PAGE))
+        if system == LAYOUT_PROMPT:
+            return httpx.Response(503, json={})
+        return httpx.Response(200, json=completion(reply))
+
+    reader = OpenAIOcrReader(timeout=5, transport=httpx.MockTransport(handler))
+    try:
+        assert await reader.read(page(struck_page), PRESET) == OcrReading(text=expected)
+    finally:
+        await reader.aclose()
+    mark = calls[2]
+    assert mark["messages"][0]["content"] == MARK_PROMPT.format(struck=1, underlined=0)
+    assert mark["reasoning_effort"] == "low"
+    boxed = mark["messages"][1]["content"][1]["image_url"]["url"]
+    assert boxed != calls[0]["messages"][1]["content"][1]["image_url"]["url"]
+
+
+@pytest.mark.parametrize(
+    "second,steps,degraded",
+    [
+        (answer(TABLE_PAGE), ("pass1 ok", "pass2 accepted", "marks none found"), False),
+        (
+            answer(None, status=503),
+            ("pass1 ok", "pass2 provider_error", "marks none found"),
+            True,
+        ),
+        (slow, ("pass1 ok", "pass2 deadline", "marks none found"), True),
+        (
+            answer(TABLE_PAGE.replace("๗๒", "๓๒")),
+            ("pass1 ok", "pass2 rejected", "marks none found"),
+            True,
+        ),
+    ],
+)
+async def test_ocr_adapter_reports_what_each_pass_did(second, steps, degraded):
+    _, handler = two_pass(second)
+    reader = OpenAIOcrReader(timeout=0.5, transport=httpx.MockTransport(handler))
+    try:
+        reading = await reader.read(b"\x89PNG", PRESET)
+    finally:
+        await reader.aclose()
+    assert (reading.steps, reading.degraded) == (steps, degraded)
+
+
+async def test_ocr_adapter_reports_pass_one_failure_and_edit_mark_outcomes():
+    def broken_pass_one(request):
+        return httpx.Response(200, json=completion("cut", "length"))
+
+    reader = OpenAIOcrReader(timeout=5, transport=httpx.MockTransport(broken_pass_one))
+    try:
+        reading = await reader.read(b"\x89PNG", PRESET)
+    finally:
+        await reader.aclose()
+    assert reading.steps == ("pass1 invalid_output",) and reading.degraded
+
+    for reply, step, degraded in (
+        ("~~วาระที่~~" + PLAIN_PAGE.removeprefix("วาระที่"), "marks applied (1+0)", False),
+        (PLAIN_PAGE, "marks rejected (0+0 marked, 1+0 boxes)", True),
+    ):
+
+        async def handler(request, reply=reply):
+            system = json.loads(request.content)["messages"][0]["content"]
+            if system == PROMPT:
+                return httpx.Response(200, json=completion(PLAIN_PAGE))
+            if system == LAYOUT_PROMPT:
+                return httpx.Response(200, json=completion(PLAIN_PAGE))
+            return httpx.Response(200, json=completion(reply))
+
+        reader = OpenAIOcrReader(timeout=5, transport=httpx.MockTransport(handler))
+        try:
+            reading = await reader.read(page(struck_page), PRESET)
+        finally:
+            await reader.aclose()
+        assert reading.steps == ("pass1 ok", "pass2 accepted", step)
+        assert reading.degraded is degraded
 
 
 async def test_page_renderer_renders_requested_page_as_png():

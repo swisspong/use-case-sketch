@@ -19,9 +19,10 @@ class Settings(BaseSettings):
     llm_config_api_key_secret: str = "change-me-to-a-long-random-secret-for-api-keys"
     documents_max_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
     documents_parse_timeout_seconds: float = Field(default=30, gt=0)
-    # Total provider deadline for OCR of one page, both passes (Penpot said 60 s; raised
-    # to 90 s because transcribe + structure takes ~58 s, see docs/ocr-table-structure-experiment.md).
-    documents_ocr_timeout_seconds: float = Field(default=90, gt=0)
+    # Total provider deadline for OCR of one page, all passes (Penpot said 60 s). Dense
+    # pages take 25-75 s for transcribe + structure and the edit-mark pass needs ~11 s
+    # more (docs/ocr-table-structure-experiment.md); the frontend waits 150 s.
+    documents_ocr_timeout_seconds: float = Field(default=110, gt=0)
 
 
 @lru_cache

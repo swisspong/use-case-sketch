@@ -1,7 +1,7 @@
 import uuid
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from app.modules.documents.repository import DocumentRepo
@@ -40,10 +40,15 @@ OcrFailure = Literal["provider_timeout", "provider_error", "invalid_output"]
 
 @dataclass(frozen=True)
 class OcrReading:
-    """Either recognised text or a provider failure reason (callers branch on it)."""
+    """Either recognised text or a provider failure reason (callers branch on it).
+
+    steps says what each pass did, for the log only (never provider text). degraded means
+    a pass failed or was skipped, so the text may lack structure or edit marks."""
 
     text: str | None = None
     reason: OcrFailure | None = None
+    steps: tuple[str, ...] = field(default=(), compare=False)
+    degraded: bool = field(default=False, compare=False)
 
 
 class OcrReader(Protocol):

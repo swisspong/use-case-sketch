@@ -15,11 +15,15 @@ SPEC
       row is repaired without touching cell text (adapter).
 - [x] Superscript footnote markers are kept as [^n] (footnote lines as [^n]:), so they never
       merge into numbers; a full-width title row has no label and empty labels are removed.
-- [x] Strike/underline marks (~~, ++) that the transcription pass adds on its own are removed:
-      the model finds them too unreliably to trust (docs/ocr-table-structure-experiment.md).
+- [x] Strike/underline marks (~~, ++) that the transcription pass adds on its own are removed.
+      Struck/underlined text is instead found in pixels; a mark pass wraps the boxed words
+      in ~~/++, kept only with one pair per detected line and the text unchanged (adapter).
+- [x] Each OCR logs one line (document, page, preset, steps; never provider text): WARNING
+      when it failed or a pass was skipped/rejected, INFO otherwise.
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).
 """
 
+import logging
 import time
 import uuid
 from datetime import UTC, datetime
@@ -67,6 +71,9 @@ class OcrResult(BaseModel):
     duration_ms: int
 
 
+log = logging.getLogger(__name__)
+
+
 async def ocr_page(
     document_id: uuid.UUID,
     data: OcrIn,
@@ -101,6 +108,19 @@ async def ocr_page(
 
     def elapsed() -> int:
         return round((time.monotonic() - start) * 1000)
+
+    # One line per OCR so a reported document can be traced; degraded results are
+    # warnings so they show without logging configuration. Never provider text.
+    log.log(
+        logging.WARNING if reading.text is None or reading.degraded else logging.INFO,
+        "OCR document=%s page=%d preset=%s %s ms=%d steps=%s",
+        document_id,
+        data.page,
+        preset.name,
+        "failed" if reading.text is None else "ok",
+        elapsed(),
+        "; ".join(reading.steps) or "-",
+    )
 
     if reading.text is None:
         return OcrResult(
