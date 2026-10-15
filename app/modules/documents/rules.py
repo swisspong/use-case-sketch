@@ -101,15 +101,21 @@ _LATEX_ENV = re.compile(
     r"\\(?:begin|end)\{(?:tabular|array|table)\*?\}(?:\{[^{}]*\})?|\\[hc]line(?:\{[^{}]*\})?"
 )
 _LATEX_BREAK = re.compile(r"\\\\|&")
+# Edit marks pass 1 sometimes adds on its own (~~struck~~, ++underlined++). They are found
+# too unreliably to keep (experiment 8), so they are removed and the text stays.
+_STRUCK = re.compile(r"~~(.+?)~~", re.DOTALL)
+_UNDERLINED = re.compile(r"\+\+(?=\S)(.+?)(?<=\S)\+\+", re.DOTALL)
 
 
 def strip_markup(text: str) -> str:
     """Turn markup a plain transcription should not contain back into plain lines.
-    <br> and HTML table tags end a line, simple inline tags are removed but their text
-    stays, LaTeX tabular cells and rows become lines, and pipe-table cells become one
-    line each without separator cells. Tables
-    nested in a cell are flattened the same way. Blank lines are dropped, because tags and
-    their indentation leave many. Text without markup is returned unchanged."""
+    Edit marks (~~struck~~, ++underlined++) are removed first, keeping their text and
+    layout. <br> and HTML table tags end a line, simple inline tags are removed but their
+    text stays, LaTeX tabular cells and rows become lines, and pipe-table cells become one
+    line each without separator cells. Tables nested in a cell are flattened the same
+    way. Blank lines are dropped, because tags and their indentation leave many. Text
+    without markup is returned unchanged."""
+    text = _UNDERLINED.sub(r"\1", _STRUCK.sub(r"\1", text)).replace("~~", "")
     if not (
         _BREAK_TAG.search(text)
         or _INLINE_TAG.search(text)

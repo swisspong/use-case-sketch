@@ -38,7 +38,8 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
   unchanged; otherwise pass 1 is returned. Pass 2 uses `reasoning_effort: "low"`, and
   a missing table separator row is repaired; markup in pass 1 is flattened first.
   Superscript footnote markers are written `[^n]` (footnotes `[^n]:`), and empty
-  labels added by pass 2 are removed
+  labels added by pass 2 are removed. Strike/underline marks (`~~`, `++`) that pass 1
+  adds on its own are removed, because they are found too unreliably to keep
   (see `docs/ocr-table-structure-experiment.md`). No automatic retries, because the user
   retries explicitly. A truncated reply (`finish_reason=length`) or a malformed reply in
   pass 1 is `invalid_output`. Credentials and provider text are never logged.

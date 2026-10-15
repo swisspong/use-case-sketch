@@ -226,3 +226,29 @@ def test_latex_tables_from_pass_one_are_flattened_like_pipe_tables():
     assert strip_markup(latex) == strip_markup(MARKUP.split("\n| ๔.๘.๔")[0])
     # Outside a LaTeX table, & and \\ are page text.
     assert strip_markup("R&D ๑๐๐ %") == "R&D ๑๐๐ %"
+
+
+def test_header_wrapped_over_two_lines_can_become_one_label():
+    # Seen live: a two-column comparison whose headers each wrap over two lines.
+    plain = """ครม. เห็นชอบปฏิญญาระดับรัฐมนตรี
+ฉบับ Final Draft
+ปฏิญญาระดับรัฐมนตรีที่ได้รับรองในการประชุม
+UNEA 6
+๗. พวกเรารับทราบด้วยความห่วงใย
+๗. พวกเรารับทราบด้วยความห่วงใยอย่างยิ่ง"""
+    structured = """ครม. เห็นชอบปฏิญญาระดับรัฐมนตรี ฉบับ Final Draft: ๗. พวกเรารับทราบด้วยความห่วงใย
+ปฏิญญาระดับรัฐมนตรีที่ได้รับรองในการประชุม UNEA 6: ๗. พวกเรารับทราบด้วยความห่วงใยอย่างยิ่ง"""
+    assert same_content(plain, structured)
+    assert not same_content(plain, structured.replace("อย่างยิ่ง", ""))
+
+
+def test_edit_marks_from_pass_one_are_removed_and_text_kept():
+    # Seen live: pass 1 wrapped some struck-through text in ~~ on its own.
+    marked = (
+        "ฉบับที่ ๖ ~~โดย~~++และพวกเรา++\n\nยั่งยืน~~อย่างมากถึงร้อยละ ๔๓\nภายในปี ค.ศ. ๒๐๓๐~~"
+    )
+    assert strip_markup(marked) == (
+        "ฉบับที่ ๖ โดยและพวกเรา\n\nยั่งยืนอย่างมากถึงร้อยละ ๔๓\nภายในปี ค.ศ. ๒๐๓๐"
+    )
+    # Not markup: a lone ++ in page text.
+    assert strip_markup("ภาษา C++ และ C++") == "ภาษา C++ และ C++"

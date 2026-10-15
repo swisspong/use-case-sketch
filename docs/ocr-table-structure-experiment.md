@@ -368,3 +368,83 @@ as `๒๕๒๗` (1 of 23 runs that contain it), so that run's real score is 10
 
 These come from the model reading the page (pass 1). The two-pass flow does not cause
 them and cannot fix them.
+
+## Experiment 8: strikethrough page (track changes), 2026-10-16
+
+Page `0fc281bc-3f19-4bdd-b594-03ddb14dfdef`: a 2-column comparison (ครม. Final Draft |
+UNEA 6 adopted text). The scan is JPEG2000 (`JPXDecode`, 1650×2331). In the right
+column, deleted text has a line through it and inserted text is underlined.
+
+### Findings on the stored OCR (current code)
+
+- The words are accurate. Unlike the parser (ลึง, ๔๙, ๒๐๙, มันคง, ๖o), it got these
+  right.
+- Deleted text appears as ordinary text and inserted text is not marked. A reader cannot
+  tell that, for example, "อย่างมากถึงร้อยละ ๔๓ … ค.ศ. ๒๐๕๐" was removed from the adopted
+  text. The meaning is lost.
+- There was no structure, because the guard wrongly rejected pass 2. Each column header
+  wraps over 2 pass-1 lines, pass 2 joined each into one label, and no single dropped
+  line contained the whole label. **Fixed:** the header-run check now looks for the label
+  in the dropped run joined together (test added). The recorded pass 2 of this page is
+  accepted now. Tampered outputs (digit change, dropped line) are still rejected, and
+  no other recorded decision changed because of this fix.
+
+### Prompt trial: `~~deleted~~` and `++inserted++` (not adopted)
+
+Pass 1 got one more sentence: "wrap text that has a line drawn through it (deleted) in
+~~ ~~, and underlined text (inserted) in ++ ++ … Mark nothing else." Pass 2 got rule 7,
+"keep the marks". There were 16 strict checks, verified by eye: 8 deleted spans, 6
+inserted spans, and 2 left-column spans that must stay unmarked.
+
+| Run | Marks right | Notes |
+|---|---|---|
+| current prompts | 2/16 | no marks at all |
+| trial 1 | 8/16 | long strikes found (marked line by line); a spurious `~~ประเมิน~~`; short marks missed |
+| trial 2 | 5/16 | only 3 strike spans, no underlines |
+| trial 3 | 6/16 | long strikes found; `โดย`→`และพวกเรา` and `ซึ่งรับรอง` missed |
+| table / super pages | 9/10, 18/18 | no spurious `~~`/`++`; ท่าไม้รวก→ท่ายาง again (pass 1) |
+
+- Long struck passages are mostly found, but the start is off by a word (the strike
+  starts at "อย่างมาก", and the model starts after it).
+- Short single-word strikes (`โดย`, `ซึ่งรับรอง`) and underlines (`รายงาน`) are missed in
+  most runs.
+- Pass 1 took longer (17–46 s) than without the marks.
+
+Not adopted: marks are wrong or missing in about half the cases, so the output would
+look trustworthy when it is not.
+
+### Trial 2: a separate mark call, verified by code (not adopted)
+
+This takes the lesson from experiment 1 (one task per call) and applies it to edit marks.
+After the normal OCR, a third call gets the image and the OCR result and must return the
+same text with `~~deleted~~` and `++inserted++` added. Code removes the marks and must get
+back the input, ignoring whitespace, with marks in pairs. Otherwise the marks are
+dropped. A plain phrase list was not used, because both columns contain identical
+sentences, so code could not tell which occurrence to mark.
+
+| Run | Marks right (of 16) | Mark call | Total | Notes |
+|---|---|---|---|---|
+| strike 1 | 6 | 51.0 s | 74.1 s | rejected: the OCR text already held marks (see below) |
+| strike 2 | 12 | 64.6 s | 110.8 s | over the 90 s deadline |
+| strike 3 | 7 | 39.7 s | 86.2 s | no underlines found |
+| table 1 | no spurious marks | 27.6 s | 56.7 s | |
+
+- Accuracy is still not reliable: 6, 12 and 7 of 16. Underlines were missed in 2 of 3
+  runs, and the strike start ("อย่างมาก") was wrong in every run.
+- The mark call reasoned for 5,300–7,800 tokens and added 40–65 s, so the total exceeds
+  the 90 s deadline.
+- **New finding:** with the current production prompt, pass 1 sometimes adds `~~` around
+  struck text on its own (5 strike pairs in strike run 1, no underlines). So production
+  output for track-changes pages may carry partial strike marks.
+
+Not adopted. A cheaper, reliable option is to flag that a page *has* strike or underline
+marks, and warn the reader in the UI, without marking where.
+
+### Decision (2026-10-16)
+
+Spontaneous edit marks from pass 1 are removed. `strip_markup` drops paired `~~…~~` and
+`++…++` (and any stray `~~`) but keeps their text, layout and blank lines. A lone `++`,
+as in `C++`, is page text and stays. Checked on every recorded output that has marks:
+no `~~` or `++` is left, and nothing else changes unless the text also holds table
+markup. Pages with track changes still read as plain text, and a warning in the UI
+remains an option (it needs a Penpot design first).

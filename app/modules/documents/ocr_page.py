@@ -15,6 +15,8 @@ SPEC
       row is repaired without touching cell text (adapter).
 - [x] Superscript footnote markers are kept as [^n] (footnote lines as [^n]:), so they never
       merge into numbers; a full-width title row has no label and empty labels are removed.
+- [x] Strike/underline marks (~~, ++) that the transcription pass adds on its own are removed:
+      the model finds them too unreliably to trust (docs/ocr-table-structure-experiment.md).
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).
 """
 
