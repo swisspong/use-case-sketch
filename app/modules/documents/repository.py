@@ -1,7 +1,8 @@
 import uuid
 
-from sqlalchemy import func, select, true
+from sqlalchemy import func, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.modules.documents.models import Document, DocumentPage
 
@@ -64,28 +65,40 @@ class DocumentRepo:
         pages = (
             await self._session.scalars(
                 select(DocumentPage)
+                .options(undefer(DocumentPage.ocr))
                 .where(DocumentPage.document_id == document_id)
                 .order_by(DocumentPage.number)
+                .execution_options(populate_existing=True)
             )
         ).all()
         return [
             {
                 "number": p.number,
                 "ocr_suggested": not p.quality["passed"],
-                "has_ocr": False,
-                "text_passed": p.quality["passed"],
+                "has_ocr": p.ocr is not None,
+                "text_passed": p.text_passed,
             }
             for p in pages
         ]
 
-    async def get_page(self, document_id: uuid.UUID, number: int) -> dict | None:
-        from sqlalchemy.orm import undefer
-
-        page = await self._session.scalar(
+    async def get_page(
+        self, document_id: uuid.UUID, number: int
+    ) -> DocumentPage | None:
+        return await self._session.scalar(
             select(DocumentPage)
-            .options(undefer(DocumentPage.text))
+            .options(undefer(DocumentPage.text), undefer(DocumentPage.ocr))
             .where(
                 DocumentPage.document_id == document_id, DocumentPage.number == number
             )
+            .execution_options(populate_existing=True)
         )
-        return {"text": page.text, "quality": page.quality} if page else None
+
+    async def save_ocr(self, document_id: uuid.UUID, number: int, ocr: dict) -> None:
+        # Overwrites only the OCR column: concurrent reruns keep the last success.
+        await self._session.execute(
+            update(DocumentPage)
+            .where(
+                DocumentPage.document_id == document_id, DocumentPage.number == number
+            )
+            .values(ocr=ocr)
+        )

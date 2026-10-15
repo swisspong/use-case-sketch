@@ -7,7 +7,16 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.documents.ports import PdfInspector
+from app.modules.documents.ports import (
+    DocumentUow,
+    OcrPresets,
+    OcrReader,
+    PageRenderer,
+    PdfInspector,
+)
+from app.modules.documents.repository import DocumentRepo
+from app.modules.llm_config.credentials import SavedPresetCredentials
+from app.modules.llm_config.crypto import ApiKeyCipher
 from app.modules.llm_config.ports import ConnectionProbe, PresetUow
 from app.modules.llm_config.repository import PresetRepo
 from app.shared.config import Settings, get_settings
@@ -60,9 +69,37 @@ def get_pdf_inspector(res: ResDep) -> PdfInspector:
 
 PdfInspectorDep = Annotated[PdfInspector, Depends(get_pdf_inspector)]
 
-# Adapter deps, one per external client, e.g.:
-# def get_ocr(res: ResDep) -> TextExtractor: return res.ocr
-# OcrDep = Annotated[TextExtractor, Depends(get_ocr)]
+
+def get_page_renderer(res: ResDep) -> PageRenderer:
+    return res.page_renderer
+
+
+PageRendererDep = Annotated[PageRenderer, Depends(get_page_renderer)]
+
+
+def get_ocr_reader(res: ResDep) -> OcrReader:
+    return res.ocr_reader
+
+
+OcrReaderDep = Annotated[OcrReader, Depends(get_ocr_reader)]
+
+
+def get_document_uow(res: ResDep) -> DocumentUow:
+    return uow_factory(res, DocumentRepo)
+
+
+DocumentUowDep = Annotated[DocumentUow, Depends(get_document_uow)]
+
+
+def get_ocr_presets(res: ResDep) -> OcrPresets:
+    # Wiring between independent modules: documents sees only the OcrPresets port.
+    return SavedPresetCredentials(
+        uow_factory(res, PresetRepo),
+        ApiKeyCipher(res.settings.llm_config_api_key_secret),
+    )
+
+
+OcrPresetsDep = Annotated[OcrPresets, Depends(get_ocr_presets)]
 
 
 async def get_document_thresholds(

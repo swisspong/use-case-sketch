@@ -29,6 +29,8 @@ def main():
             "TEXT_QUALITY_DEFAULT_MAX_GARBLED_THAI_PERCENT": "7",
             "TEXT_QUALITY_DEFAULT_MIN_TEXT_CHARS": "64",
             "TEXT_QUALITY_DEFAULT_MAX_IMAGE_PERCENT": "81",
+            # Short provider deadline so the timeout journey stays fast.
+            "DOCUMENTS_OCR_TIMEOUT_SECONDS": "2",
         }
         subprocess.run(
             [sys.executable, "-m", "alembic", "upgrade", "head"],

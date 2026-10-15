@@ -49,9 +49,14 @@ runs in a subprocess with a deadline and cancellation cleanup. Upload failures c
 the selection; retry requires an explicit new upload.
 
 Older documents remain accessible and are explicitly shown as not assessed; upload
-again to obtain page results. OCR execution and comparison are the next increment.
+again to obtain page results.
 
-`make dev` applies document migrations through `20261015_thai_max` automatically.
+OCR is a per-page user action (`POST /documents/{id}/ocr`) using the default LLM preset.
+The page is rendered to PNG and sent to the preset's OpenAI-compatible vision model, and
+only the latest successful result is kept. The result is then compared with the parser
+in the detail panel. See [OCR behavior](docs/documents-round-three.md).
+
+`make dev` applies document migrations through `20261016_page_ocr` automatically.
 If starting the API separately, run `make dev-migrate` first. See
 [round-two behavior and metric definitions](docs/documents-round-two.md) and the
 [historical first increment](docs/documents-round-one.md).

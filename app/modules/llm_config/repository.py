@@ -45,6 +45,13 @@ class PresetRepo:
             )
         )
 
+    async def default(self) -> Preset | None:
+        return await self._session.scalar(
+            select(Preset)
+            .where(Preset.is_default)
+            .execution_options(populate_existing=True)
+        )
+
     async def get(self, preset_id: uuid.UUID) -> Preset | None:
         return await self._session.get(Preset, preset_id, populate_existing=True)
 

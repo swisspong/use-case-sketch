@@ -64,5 +64,19 @@ class DocumentPage(Base):
     number: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(deferred=True)
     quality: Mapped[dict] = mapped_column(JSONB)
+    # Latest successful OCR only ({preset_name, model_id, created_at, text, quality}).
+    # Failures are never stored, so a failed rerun keeps the previous result.
+    ocr: Mapped[dict | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, deferred=True
+    )
+
+    @property
+    def ocr_passed(self) -> bool:
+        return self.ocr is not None and self.ocr["quality"]["passed"]
+
+    @property
+    def text_passed(self) -> bool:
+        # A page is usable when either the parser or its latest OCR passes.
+        return self.quality["passed"] or self.ocr_passed
 
     __table_args__ = (CheckConstraint("number > 0", name="positive_number"),)

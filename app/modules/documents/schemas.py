@@ -77,8 +77,16 @@ class ParserResult(BaseModel):
     quality: Quality
 
 
+class OcrOutput(BaseModel):
+    preset_name: str
+    model_id: str
+    created_at: datetime
+    text: str
+    quality: Quality
+
+
 class PageResult(BaseModel):
     number: int
     thresholds: ThresholdSnapshot | LegacyThresholdSnapshot
     parser: ParserResult
-    ocr: None = None
+    ocr: OcrOutput | None = None

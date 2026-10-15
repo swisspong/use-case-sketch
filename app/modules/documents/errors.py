@@ -1,4 +1,4 @@
-from app.shared.errors import Invalid, NotFound
+from app.shared.errors import AppError, Conflict, Invalid, NotFound
 
 
 class NotPdf(Invalid):
@@ -27,3 +27,20 @@ class ProcessingTimeout(Invalid):
 
 class PageNotFound(NotFound):
     code, error_code = "page_not_found", "DOC_008"
+
+
+class PageOutOfRange(Invalid):
+    code, error_code = "page_out_of_range", "DOC_009"
+
+
+class NoDefaultPreset(Conflict):
+    code, error_code = "no_default_preset", "DOC_012"
+
+
+class OcrPresetNotFound(NotFound):
+    code, error_code = "ocr_preset_not_found", "DOC_013"
+
+
+class PageRenderFailed(AppError):
+    # The page was parsed at upload; failing to rasterise it is a server fault.
+    status, code, error_code = 500, "internal_error", "SYS_002"

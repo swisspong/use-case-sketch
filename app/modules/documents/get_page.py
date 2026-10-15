@@ -2,6 +2,7 @@
 SPEC
 - [x] Missing document and page have distinct errors; legacy documents have no results.
 - [x] Reading a page returns saved text, quality and the original threshold snapshot.
+- [x] The latest successful OCR result is returned with the page, or null.
 """
 
 import uuid
@@ -19,10 +20,15 @@ async def get_page(
     document_id: uuid.UUID, number: int, repo: DocumentRepo
 ) -> PageResult:
     document = await get_document(document_id, repo)
-    parser = await repo.get_page(document_id, number)
-    if parser is None:
+    page = await repo.get_page(document_id, number)
+    if page is None:
         raise PageNotFound
-    return PageResult(number=number, thresholds=document.thresholds, parser=parser)
+    return PageResult(
+        number=number,
+        thresholds=document.thresholds,
+        parser={"text": page.text, "quality": page.quality},
+        ocr=page.ocr,
+    )
 
 
 router = APIRouter()

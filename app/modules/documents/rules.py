@@ -1,5 +1,8 @@
 """Deterministic quality heuristics. No dictionary or language model is consulted."""
 
+import re
+from collections import Counter
+
 from app.modules.documents.text_quality import assess_problem_characters
 
 
@@ -15,8 +18,14 @@ def assess_quality(text: str, image_percent: float, thresholds: dict[str, int]) 
     }
     # Decide with the same values exposed by the API (inclusive boundaries).
     failed = []
+    # Historical snapshots keep their original minimum-Thai direction.
+    thai_rule = (
+        ("min_thai_percent", "thai_percent", True)
+        if "min_thai_percent" in thresholds
+        else ("max_thai_percent", "thai_percent", False)
+    )
     for key, metric, minimum in (
-        ("max_thai_percent", "thai_percent", False),
+        thai_rule,
         ("max_garbled_thai_percent", "garbled_thai_percent", False),
         ("min_text_chars", "text_chars", True),
         ("max_image_percent", "image_percent", False),
@@ -28,3 +37,48 @@ def assess_quality(text: str, image_percent: float, thresholds: dict[str, int]) 
         ):
             failed.append(key)
     return quality | {"failed": failed, "passed": not failed}
+
+
+_SEPARATOR_ROW = re.compile(r"^[\s|:-]*-[\s|:-]*$")
+_LABEL = re.compile(r"^([^:|\n]{1,80}):")
+_LAYOUT = re.compile(r"[\s|]")
+_HEADER_LINE_CHARS = 80
+
+
+def same_content(plain: str, structured: str) -> bool:
+    """True when pass 2 only re-laid out pass 1: no character added or substituted, and
+    every pass-1 line kept, except a layout-frame header row turned into labels.
+    Whitespace, pipes and separator rows are ignored.
+
+    The header row may span several short pass-1 lines ("วาระที่", "หน่วยงาน",
+    "ที่รับผิดชอบ"), and an empty column's header never becomes a label. So a run of
+    consecutive dropped lines is accepted when every line is short and one of them
+    holds a label."""
+    flat = _LAYOUT.sub("", plain)
+    labels, kept = [], []
+    for line in structured.splitlines():
+        if _SEPARATOR_ROW.match(line):
+            continue
+        match = _LABEL.match(line)
+        label = _LAYOUT.sub("", match.group(1)) if match else ""
+        # A label is a column header copied from the page, not text written with a colon.
+        if label and label in flat and label + ":" not in flat:
+            labels.append(label)
+            line = line[match.end() :]
+        kept.append(line)
+    rebuilt = _LAYOUT.sub("", "".join(kept))
+    if Counter(rebuilt) - Counter(flat):
+        return False
+    dropped: list[str] = []
+    for line in [*plain.splitlines(), ""]:
+        line = _LAYOUT.sub("", line)
+        if line not in rebuilt:
+            dropped.append(line)
+            continue
+        if dropped and not (
+            all(len(d) <= _HEADER_LINE_CHARS for d in dropped)
+            and any(label in d for d in dropped for label in labels)
+        ):
+            return False
+        dropped = []
+    return True
