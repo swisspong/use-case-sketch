@@ -15,6 +15,13 @@ BACKEND  := $(CURDIR)/backend
 BIN      := $(BACKEND)/.venv/bin
 PYTHON   := $(BIN)/python
 
+# Settings development stack (the root app/, separate from the legacy backend/).
+APP_PYTHON   ?= $(CURDIR)/.venv/bin/python
+API_HOST     ?= 127.0.0.1
+API_PORT     ?= 8000
+FRONTEND_PORT ?= 5173
+DEV_COMPOSE  := docker compose -f "$(CURDIR)/compose.dev.yaml"
+
 PDF      ?= $(CURDIR)/คปภ.pdf
 CONFIG   ?= $(BACKEND)/examples/mfec.local.json
 DATA_DIR ?= $(BACKEND)/local-documents/v3
@@ -33,9 +40,17 @@ RESOLVE_DOC_ID = id="$(DOC_ID)"; \
 	if [ -z "$$id" ]; then echo "No DOC_ID: run 'make extract' or pass DOC_ID=..." >&2; exit 1; fi
 
 .PHONY: help install extract ocr all show-doc test-v3
+.PHONY: dev dev-db dev-db-stop dev-db-logs dev-migrate dev-backend dev-frontend
 
 help:
 	@echo "Targets:"
+	@echo "  dev             Start Postgres/Redis, migrate, then run API + frontend (Ctrl+C to stop servers)"
+	@echo "  dev-db          Start Postgres/Redis from compose.dev.yaml and wait until healthy"
+	@echo "  dev-db-stop     Stop development containers (keep database data)"
+	@echo "  dev-db-logs     Follow development database logs"
+	@echo "  dev-migrate     Start databases and apply migrations"
+	@echo "  dev-backend     Run FastAPI with reload on $(API_HOST):$(API_PORT)"
+	@echo "  dev-frontend    Run Vite on http://127.0.0.1:$(FRONTEND_PORT)"
 	@echo "  install   Install backend (editable) into $(BIN)"
 	@echo "  extract   Step 1: extract-pdf-text-v3 PDF -> DATA_DIR (saves last document id)"
 	@echo "  ocr       Step 2: ocr-document-pages-v3 DOC_ID (default: last extracted)"
@@ -45,6 +60,27 @@ help:
 	@echo "Variables: PDF=$(PDF)"
 	@echo "           CONFIG=$(CONFIG) PRESET=$(PRESET)"
 	@echo "           DATA_DIR=$(DATA_DIR) DOC_ID=$(DOC_ID) PAGES=$(PAGES)"
+
+dev: dev-migrate
+	+$(MAKE) --no-print-directory --jobs=2 dev-backend dev-frontend
+
+dev-db:
+	$(DEV_COMPOSE) up -d --wait
+
+dev-db-stop:
+	$(DEV_COMPOSE) stop
+
+dev-db-logs:
+	$(DEV_COMPOSE) logs -f
+
+dev-migrate: dev-db
+	"$(APP_PYTHON)" -m alembic upgrade head
+
+dev-backend:
+	"$(APP_PYTHON)" -m uvicorn app.main:app --reload --host "$(API_HOST)" --port "$(API_PORT)"
+
+dev-frontend:
+	cd "$(CURDIR)/frontend" && API_PROXY_TARGET="http://127.0.0.1:$(API_PORT)" npm run dev -- --host 127.0.0.1 --port "$(FRONTEND_PORT)" --strictPort
 
 install:
 	uv pip install --python "$(PYTHON)" -e "$(BACKEND)"
