@@ -51,9 +51,9 @@ def same_content(plain: str, structured: str) -> bool:
     Whitespace, pipes and separator rows are ignored.
 
     The header row may span several short pass-1 lines ("วาระที่", "หน่วยงาน",
-    "ที่รับผิดชอบ"), and an empty column's header never becomes a label. So a run of
-    consecutive dropped lines is accepted when every line is short and one of them
-    holds a label."""
+    "ที่รับผิดชอบ"), one header may itself wrap over two lines, and an empty column's
+    header never becomes a label. So a run of consecutive dropped lines is accepted when
+    every line is short and the run, joined, holds a label."""
     flat = _LAYOUT.sub("", plain)
     labels, kept = [], []
     for line in structured.splitlines():
@@ -77,7 +77,7 @@ def same_content(plain: str, structured: str) -> bool:
             continue
         if dropped and not (
             all(len(d) <= _HEADER_LINE_CHARS for d in dropped)
-            and any(label in d for d in dropped for label in labels)
+            and any(label in "".join(dropped) for label in labels)
         ):
             return False
         dropped = []
@@ -91,21 +91,36 @@ _BREAK_TAG = re.compile(
 _INLINE_TAG = re.compile(r"</?(?:sup|sub|b|strong|i|em|u|p|span)\s*/?>", re.IGNORECASE)
 _TABLE_ROW = re.compile(r"^\s*\|.*\|\s*$")
 _SEPARATOR_CELL = re.compile(r"^:?-+:?$")
+# LaTeX tables: \multicolumn{n}{spec}{text} keeps text; \begin/\end{env}{spec} and \hline go;
+# & separates cells and \\ ends a row.
+_LATEX_TABLE = re.compile(
+    r"\\(?:begin|end)\{(?:tabular|array|table)\*?\}|\\hline|\\multicolumn"
+)
+_LATEX_SPAN = re.compile(r"\\multi(?:column|row)\{[^{}]*\}\{[^{}]*\}\{([^{}]*)\}")
+_LATEX_ENV = re.compile(
+    r"\\(?:begin|end)\{(?:tabular|array|table)\*?\}(?:\{[^{}]*\})?|\\[hc]line(?:\{[^{}]*\})?"
+)
+_LATEX_BREAK = re.compile(r"\\\\|&")
 
 
 def strip_markup(text: str) -> str:
     """Turn markup a plain transcription should not contain back into plain lines.
     <br> and HTML table tags end a line, simple inline tags are removed but their text
-    stays, and pipe-table cells become one line each without separator cells. Tables
+    stays, LaTeX tabular cells and rows become lines, and pipe-table cells become one
+    line each without separator cells. Tables
     nested in a cell are flattened the same way. Blank lines are dropped, because tags and
     their indentation leave many. Text without markup is returned unchanged."""
     if not (
         _BREAK_TAG.search(text)
         or _INLINE_TAG.search(text)
+        or _LATEX_TABLE.search(text)
         or any(_TABLE_ROW.match(line) for line in text.splitlines())
     ):
         return text
     plain = _INLINE_TAG.sub("", _BREAK_TAG.sub("\n", text))
+    if _LATEX_TABLE.search(plain):
+        plain = _LATEX_SPAN.sub(r"\1", plain)
+        plain = _LATEX_BREAK.sub("\n", _LATEX_ENV.sub("\n", plain))
     lines = []
     for line in plain.splitlines():
         cells = [cell.strip() for cell in line.split("|")]
@@ -130,3 +145,22 @@ def repair_tables(text: str) -> str:
             columns = line.strip().strip("|").count("|") + 1
             repaired.append("| " + " | ".join(["---"] * columns) + " |")
     return "\n".join(repaired)
+
+
+def drop_empty_labels(plain: str, structured: str) -> str:
+    """Remove lines that hold only a label the structuring pass added: a column header
+    and a colon with no cell text. The label must also head a non-empty cell elsewhere,
+    so a title written with a trailing colon is kept. A colon on the page is kept."""
+    flat = _LAYOUT.sub("", plain)
+    lines = structured.splitlines()
+    empty, used = set(), set()
+    for i, line in enumerate(lines):
+        match = _LABEL.match(line)
+        label = _LAYOUT.sub("", match.group(1)) if match else ""
+        if label and label in flat and label + ":" not in flat:
+            if line[match.end() :].strip():
+                used.add(label)
+            else:
+                empty.add((i, label))
+    drop = {i for i, label in empty if label in used}
+    return "\n".join(line for i, line in enumerate(lines) if i not in drop)

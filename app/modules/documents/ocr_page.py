@@ -9,10 +9,12 @@ SPEC
 - [x] Provider timeout/error/invalid output -> 200 status=failed + reason; previous OCR kept.
 - [x] OCR text keeps table structure (Markdown pipe tables, labelled layout-frame blocks)
       only when the structuring pass leaves the transcribed text unchanged (adapter).
-- [x] Markup that the transcription pass returns anyway (pipe or HTML tables, <br>, inline tags) is
-      flattened to plain lines before structuring and in the fallback (adapter).
+- [x] Markup the transcription pass returns anyway (pipe/HTML/LaTeX tables, <br>, inline
+      tags) is flattened to plain lines before structuring and in the fallback (adapter).
 - [x] The structuring pass runs with reasoning_effort "low"; a table missing its separator
       row is repaired without touching cell text (adapter).
+- [x] Superscript footnote markers are kept as [^n] (footnote lines as [^n]:), so they never
+      merge into numbers; a full-width title row has no label and empty labels are removed.
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).
 """
 

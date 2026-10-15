@@ -2,7 +2,12 @@
 
 import pytest
 
-from app.modules.documents.rules import repair_tables, same_content, strip_markup
+from app.modules.documents.rules import (
+    drop_empty_labels,
+    repair_tables,
+    same_content,
+    strip_markup,
+)
 
 # Shapes taken from a real page: a layout frame (agenda grid) holding a data table.
 PLAIN = """๔๑
@@ -149,3 +154,75 @@ def test_missing_table_separator_row_is_inserted_after_the_header():
 def test_well_formed_tables_and_plain_text_are_left_unchanged():
     for text in (STRUCTURED, PLAIN, "| only | header |\n|---|---|", "a | b ไม่ใช่ตาราง"):
         assert repair_tables(text) == text
+
+
+# Footnote page shape: a frame with a full-width title row and superscript markers.
+FOOTNOTE_PLAIN = """- ๓ -
+๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ
+โรคจากการประกอบอาชีพ
+รายละเอียด
+โรคจากรังสีก่อไอออน
+(โรคจากรังสีแตกตัว)[^๓]
+• ในปี ๒๕๖๖ เกิดเหตุฉุกเฉินทางรังสี จากเหตุการณ์ซีเซียม-๑๓๗[^๔] หายไป
+หมายเหตุ :
+[^๓]: โรคจากรังสีก่อไอออน (โรคจากรังสีแตกตัว) อยู่ระหว่างการพิจารณา
+[^๔]: ซีเซียม-๑๓๗ คือสารกัมมันตรังสีที่ใช้ในทางการแพทย์และอุตสาหกรรม"""
+
+FOOTNOTE_STRUCTURED = """- ๓ -
+
+๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ
+
+โรคจากการประกอบอาชีพ: โรคจากรังสีก่อไอออน
+(โรคจากรังสีแตกตัว)[^๓]
+รายละเอียด: • ในปี ๒๕๖๖ เกิดเหตุฉุกเฉินทางรังสี จากเหตุการณ์ซีเซียม-๑๓๗[^๔] หายไป
+หมายเหตุ :
+
+[^๓]: โรคจากรังสีก่อไอออน (โรคจากรังสีแตกตัว) อยู่ระหว่างการพิจารณา
+[^๔]: ซีเซียม-๑๓๗ คือสารกัมมันตรังสีที่ใช้ในทางการแพทย์และอุตสาหกรรม"""
+
+
+def test_footnote_markers_pass_every_step_unchanged():
+    assert strip_markup(FOOTNOTE_PLAIN) == FOOTNOTE_PLAIN
+    assert same_content(FOOTNOTE_PLAIN, FOOTNOTE_STRUCTURED)
+    tidy = repair_tables(drop_empty_labels(FOOTNOTE_PLAIN, FOOTNOTE_STRUCTURED))
+    assert tidy == FOOTNOTE_STRUCTURED
+    # A marker merged into the number is changed text, not layout.
+    merged = FOOTNOTE_STRUCTURED.replace("๑๓๗[^๔]", "๑๓๗๔")
+    assert not same_content(FOOTNOTE_PLAIN, merged)
+
+
+def test_empty_label_is_dropped_only_when_it_is_a_column_header():
+    # The stored mislabelled result: title under the first column, then an empty label.
+    mislabelled = FOOTNOTE_STRUCTURED.replace(
+        "๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ",
+        "โรคจากการประกอบอาชีพ: ๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ\nรายละเอียด: ",
+    )
+    tidy = drop_empty_labels(FOOTNOTE_PLAIN, mislabelled)
+    assert "\nรายละเอียด: \n" not in tidy
+    assert tidy == mislabelled.replace("\nรายละเอียด: \n", "\n")
+    # A title written with a trailing colon is page text, not an empty label.
+    title = FOOTNOTE_STRUCTURED.replace(
+        "๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ", "๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ:"
+    )
+    assert drop_empty_labels(FOOTNOTE_PLAIN, title) == title
+    # "หมายเหตุ :" is written on the page and stays even with nothing after it.
+    assert "หมายเหตุ :" in drop_empty_labels(FOOTNOTE_PLAIN, FOOTNOTE_STRUCTURED)
+
+
+def test_latex_tables_from_pass_one_are_flattened_like_pipe_tables():
+    # Seen live: pass 1 answered with a LaTeX tabular, a cell holding a nested tabular.
+    latex = r"""๔๑
+\begin{tabular}{|l|l|l|}
+\hline วาระที่ & \multicolumn{1}{|c|}{มติที่ประชุม/ข้อสั่งการ} & \begin{tabular}{c}
+หน่วยงาน \\
+ที่รับผิดชอบ
+\end{tabular} \\
+\hline & \begin{tabular}{l}
+ฝ่ายเลขานุการ มีความเห็น ดังนี้ \\
+ให้ กรุงเทพมหานคร ดำเนินการ
+\end{tabular} & \\
+\hline
+\end{tabular}"""
+    assert strip_markup(latex) == strip_markup(MARKUP.split("\n| ๔.๘.๔")[0])
+    # Outside a LaTeX table, & and \\ are page text.
+    assert strip_markup("R&D ๑๐๐ %") == "R&D ๑๐๐ %"

@@ -434,6 +434,8 @@ async def broken(request):
         (answer(TABLE_PAGE), TABLE_PAGE),
         # Low reasoning effort can drop the separator row: it is put back.
         (answer(TABLE_PAGE.replace("\n| --- | --- |", "")), TABLE_PAGE),
+        # An empty label for a column header is removed; the text is unchanged.
+        (answer("มติที่ประชุม/ข้อสั่งการ:\n" + TABLE_PAGE), TABLE_PAGE),
         # Structuring changed a digit (seen with real models): keep the transcription.
         (answer(TABLE_PAGE.replace("๗๒", "๓๒")), PLAIN_PAGE),
         (answer(TABLE_PAGE + "<br>"), PLAIN_PAGE),

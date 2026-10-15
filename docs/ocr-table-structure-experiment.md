@@ -286,3 +286,85 @@ $5.00). Until the budget is raised, every OCR request returns `provider_error`.
 Note: a provider that does not support `reasoning_effort` and rejects it would fail pass
 2 every time. OCR would still return plain text, but with no tables. The LiteLLM →
 Vertex Gemini preset accepts it.
+
+## Correction: superscript checkpoints (2026-10-16)
+
+In experiments 2 to 5, the checkpoints "ยก ๓ (แตกตัว)" and "ยก ๔ (๑๓๗)" also matched text
+with no superscript marker. Every superscript-page run counted as 13/13 actually wrote
+`ซีเซียม-๑๓๗๔` (14/14 runs), so the footnote marker merges into the number. Read
+strictly, those two checkpoints failed in every run, for every variant. This does not
+change any comparison between variants. Experiment 6 scores superscripts strictly.
+
+## Experiment 6: footnote markers and full-width title rows (prompt only), 2026-10-16
+
+Problems found on the superscript page, which was re-uploaded as
+`0e1eedce-b344-44c2-8df2-9967ee81c194`:
+- **Footnote markers merge into numbers:** `ซีเซียม-๑๓๗` + superscript ๔ came out as
+  `ซีเซียม-๑๓๗๔`, which reads as 1374. This happened in 14/14 runs (see the correction
+  above).
+- **Full-width title row mislabelled:** the stored OCR filed the title
+  `๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ`, which spans the table width above the column
+  headers, under the first column's label, and wrote an empty `รายละเอียด:` label.
+
+Candidate prompts. The examples are neutral and not taken from the test pages:
+- **Pass 1:** "No markdown, with one exception: write each small raised footnote number
+  as [^n] right after the text it follows, using its own digits (e.g. คำ[^๑] or
+  word[^2]), and start each footnote at the bottom of the page with [^n]: . Never mark
+  ordinary numbers."
+- **Pass 2, new rules:** "5. Keep footnote markers such as [^๑] and footnote lines
+  starting with [^๑]: exactly as in the transcription. 6. A row spanning the full width
+  of a layout frame (e.g. a section title above the column headers) is its own line with
+  no label. Never write a label for an empty cell."
+
+Production adapter code (pass 2 `low` + repairs), with only the two prompts swapped. 3 runs
+per page, 2 at a time. Strict scoring:
+- **Superscript page (18 checks):** the 11 text checkpoints, `แตกตัว)[^๓]`,
+  `๑๓๗[^๔]`, no `๑๓๗๔`, footnote lines `[^๓]:` and `[^๔]:`, exactly 4 markers, the
+  title as its own unlabelled line, and no empty labels.
+- **Table page (10 checks):** the 8 checkpoints, no `[^` anywhere, and no empty labels.
+
+| | Current prompts (stored + exp 5) | New prompts |
+|---|---|---|
+| Superscript page, strict | 10/18 (stored), 12/18, 12/18 | **18/18, 18/18, 18/18** |
+| Table page, strict | 10/10, 10/10 | **10/10, 10/10, 10/10** |
+| Spurious `[^` markers on the table page | — | 0/3 |
+| Data tables well formed | yes | 3/3 |
+| Total time | 21–41 s | 23–38 s |
+
+## Experiment 7: experiment-6 prompts in production code, 2026-10-16
+
+Change: the adapter now uses the experiment-6 prompts word for word. `rules.drop_empty_labels`
+removes a line that holds only a label the structuring pass added (a column header with no
+cell text), but only when the same label heads a non-empty cell elsewhere. A first
+version also deleted the title `๒.๒.๑.๓ สถานการณ์ด้านโรคสำคัญ อื่น ๆ:` (written with a
+trailing colon) in a recorded run. The guard allowed it, because it fits the header-run
+exception. The narrower rule keeps such titles, and no recorded output changes.
+
+A new pass-1 markup form appeared live: a LaTeX `tabular` (with `\multicolumn`, `\hline`,
+`&`, `\\`, and a nested tabular in a cell). It passed through unflattened, so pass 2 was
+rejected and the final text was raw LaTeX. `strip_markup` now flattens LaTeX tables as
+well. `&` and `\\` are treated as cell or row breaks only inside a LaTeX table. The
+recorded LaTeX output flattens to text with no `\ & | {` left, and all checkpoints hold.
+
+Live runs with the final code (`exp8`):
+
+| Run | Total | Strict score | Tables well formed | Notes |
+|---|---|---|---|---|
+| super 1 | 21.7 s | 18/18 | — | |
+| super 2 | 34.1 s | 18/18 | — | |
+| table 1 | 25.4 s | 11/11 | — (raw LaTeX) | before the LaTeX fix |
+| table 2 | 25.6 s | 10/11 | 1/1 | pass 1 read ท่าไม้รวก as ท่ายาง |
+| table 3 | 23.1 s | 11/11 | 1/1 | |
+
+Table-page strict scoring now also checks `พ.ศ. ๒๕๖๗`. Experiment-6 table run 1 read it
+as `๒๕๒๗` (1 of 23 runs that contain it), so that run's real score is 10/11, not 10/10.
+
+### Pass-1 misreads seen so far (all runs, random)
+
+- ท่าไม้รวก→ท่ายาง: 5 of 40
+- ๒๕๔๖→๒๕๕๖: pdf input only
+- ๔,๙๔๖→๔,๙๔๐: 2 runs
+- ๒๕๖๗→๒๕๒๗: 1 of 23
+
+These come from the model reading the page (pass 1). The two-pass flow does not cause
+them and cannot fix them.
