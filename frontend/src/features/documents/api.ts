@@ -91,8 +91,7 @@ export async function getDocument(id: string, signal?: AbortSignal) {
         object(p) &&
         p.number === i + 1 &&
         typeof p.ocr_suggested === "boolean" &&
-        typeof p.has_ocr === "boolean" &&
-        typeof p.text_passed === "boolean"
+        typeof p.has_ocr === "boolean"
     )
   )
     throw new DocumentError()
@@ -158,7 +157,6 @@ export type PageSummary = {
   number: number
   ocr_suggested: boolean
   has_ocr: boolean
-  text_passed: boolean
 }
 export type DocumentDetail = DocumentSummary & { pages: PageSummary[] }
 export type Thresholds = {
@@ -197,7 +195,6 @@ export type OcrResult =
       page: number
       status: "ok"
       ocr: OcrOutput
-      text_passed: boolean
       duration_ms: number
     }
   | {
@@ -356,9 +353,7 @@ export async function ocrPage(
     data.page !== page ||
     !Number.isSafeInteger(data.duration_ms) ||
     !(
-      (data.status === "ok" &&
-        typeof data.text_passed === "boolean" &&
-        validOcr(data.ocr, allCriteria)) ||
+      (data.status === "ok" && validOcr(data.ocr, allCriteria)) ||
       (data.status === "failed" &&
         ["provider_timeout", "provider_error", "invalid_output"].includes(
           data.reason as string

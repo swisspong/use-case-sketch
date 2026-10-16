@@ -31,7 +31,6 @@ class PageSummary(BaseModel):
     number: int
     ocr_suggested: bool
     has_ocr: bool = False
-    text_passed: bool
 
 
 class DocumentDetail(DocumentSummary):

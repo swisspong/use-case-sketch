@@ -5,7 +5,9 @@ SPEC
       all checked before rendering or calling the provider.
 - [x] Provider is called outside any DB transaction: read (tx) -> render + OCR -> save (tx).
 - [x] OCR text is assessed with the upload-time snapshot and the parser's image coverage.
-- [x] Success replaces the previous OCR; text_passed = parser passed or OCR passed.
+- [x] Success replaces the previous OCR; OCR quality is shown, never judged.
+- [x] ocr_suggested_count drops once a parser-failed page has any OCR (reruns and
+      parser-passed pages leave it; failures change nothing).
 - [x] Provider timeout/error/invalid output -> 200 status=failed + reason; previous OCR kept.
 - [x] OCR text keeps table structure (Markdown pipe tables, labelled layout-frame blocks)
       only when the structuring pass leaves the transcribed text unchanged (adapter).
@@ -67,7 +69,6 @@ class OcrResult(BaseModel):
     page: int
     status: Literal["ok", "failed"]
     ocr: OcrOutput | None = None
-    text_passed: bool | None = None
     reason: OcrFailure | None = None
     duration_ms: int
 
@@ -145,7 +146,6 @@ async def ocr_page(
         page=data.page,
         status="ok",
         ocr=ocr,
-        text_passed=parser_quality["passed"] or ocr.quality.passed,
         duration_ms=elapsed(),
     )
 

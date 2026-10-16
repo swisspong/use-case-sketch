@@ -44,9 +44,9 @@ export function DocumentDetailPage({ id }: { id: string }) {
     () => setState({ id, error: "ไม่พบเอกสาร" }),
     [id]
   )
-  // Use the OCR response directly for the thumbnail colour; no refetch needed.
+  // A successful OCR response marks the page as OCR'd; no refetch needed.
   const ocrSaved = useCallback(
-    (page: number, textPassed: boolean) =>
+    (page: number) =>
       setState((current) =>
         current?.id === id && current.data
           ? {
@@ -54,9 +54,7 @@ export function DocumentDetailPage({ id }: { id: string }) {
               data: {
                 ...current.data,
                 pages: current.data.pages.map((p) =>
-                  p.number === page
-                    ? { ...p, has_ocr: true, text_passed: textPassed }
-                    : p
+                  p.number === page ? { ...p, has_ocr: true } : p
                 ),
               },
             }

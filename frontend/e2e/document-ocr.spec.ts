@@ -82,15 +82,18 @@ test("first OCR: preparing, running with warning, compare view, tabs, thumbnail 
   ).toBeVisible()
   await expect(panel.getByText("OCR แล้ว", { exact: true })).toBeVisible()
   await expect(
-    page.getByRole("button", { name: "หน้า 2 ผ่านเกณฑ์", exact: true })
+    page.getByRole("button", { name: "หน้า 2 OCR แล้ว", exact: true })
   ).toBeVisible()
   expect(pageGets).toBe(gets) // the POST response is used directly
-  const compare = panel.getByRole("table", { name: "เทียบเกณฑ์ผลเดิมกับ OCR" })
+  // OCR values are shown but never judged: no icons, no summary, no badge.
+  const compare = panel.getByRole("table", { name: "เทียบผลเดิมกับ OCR" })
   await expect(compare.getByText("ไม่ผ่าน 1 ข้อ")).toBeVisible()
-  await expect(compare.getByText("ผ่านทุกข้อ")).toBeVisible()
-  await expect(
-    compare.getByRole("row", { name: /จำนวนตัวอักษร/ }).getByRole("cell")
-  ).toHaveText(["0", "12"])
+  await expect(compare.getByText("ผ่านทุกข้อ")).toHaveCount(0)
+  const chars = compare.getByRole("row", { name: /จำนวนตัวอักษร/ })
+  await expect(chars.getByRole("cell")).toHaveText(["0", "12"])
+  await expect(chars.getByRole("cell").nth(1).getByLabel(/ผ่าน/)).toHaveCount(0)
+  await expect(panel.getByText("ผ่าน", { exact: true })).toHaveCount(0)
+  await expect(panel.getByText("ไม่ผ่าน", { exact: true })).toHaveCount(1)
   await expect(panel.getByText("Vision OK ·", { exact: false })).toBeVisible()
   await expect(panel.getByText("OCR · e2e-ok")).toBeVisible()
   await expect(panel.getByText("Hello OCR text", { exact: true })).toBeVisible()
@@ -106,9 +109,10 @@ test("first OCR: preparing, running with warning, compare view, tabs, thumbnail 
   await expect(panel.getByText("ไม่พบข้อความในหน้านี้")).toBeVisible()
   await expect(panel.getByText("Hello OCR text")).toHaveCount(0)
   await panel.getByRole("tab", { name: "OCR", exact: true }).click()
-  await expect(
-    panel.getByRole("table", { name: "คุณภาพ OCR เทียบเกณฑ์" })
-  ).toBeVisible()
+  const ocrValues = panel.getByRole("table", { name: "ค่าวัดข้อความ OCR" })
+  await expect(ocrValues).toBeVisible()
+  await expect(ocrValues.getByLabel(/ผ่าน/)).toHaveCount(0)
+  await expect(panel.getByText("ผ่าน", { exact: true })).toHaveCount(0)
   await expect(panel.getByText("Hello OCR text", { exact: true })).toBeVisible()
 
   // Page 1 passed the parser: no alert, but OCR is still offered.
@@ -129,8 +133,8 @@ test("first OCR: preparing, running with warning, compare view, tabs, thumbnail 
     number: 2,
     ocr_suggested: true,
     has_ocr: true,
-    text_passed: true,
   })
+  expect(detail.ocr_suggested_count).toBe(0)
   await page.screenshot({
     path: "test-results/document-ocr-compare.png",
     fullPage: true,
@@ -172,13 +176,14 @@ test("rerun keeps the previous result while running, replaces it on success and 
   await expect(panel.getByText("Poor ·", { exact: false })).toBeVisible()
   await expect(panel.getByText("Hello OCR text")).toHaveCount(0)
   await expect(panel.getByText("OCR · e2e-ocr-poor")).toBeVisible()
+  // A poor OCR text is not judged: only the parser summary, page counts as OCR'd.
   await expect(
     panel
-      .getByRole("table", { name: "เทียบเกณฑ์ผลเดิมกับ OCR" })
+      .getByRole("table", { name: "เทียบผลเดิมกับ OCR" })
       .getByText("ไม่ผ่าน 1 ข้อ")
-  ).toHaveCount(2)
+  ).toHaveCount(1)
   await expect(
-    page.getByRole("button", { name: "หน้า 2 แนะนำ OCR", exact: true })
+    page.getByRole("button", { name: "หน้า 2 OCR แล้ว", exact: true })
   ).toBeVisible()
 
   await setDefault(page, broken.id)
@@ -364,7 +369,7 @@ test("changing page during OCR disables OCR elsewhere and the late result only u
   ).toBeDisabled()
   held.release()
   await expect(
-    page.getByRole("button", { name: "หน้า 2 ผ่านเกณฑ์", exact: true })
+    page.getByRole("button", { name: "หน้า 2 OCR แล้ว", exact: true })
   ).toBeVisible()
   await expect(
     panel.getByRole("heading", { name: "ข้อความจาก PDF · หน้า 1" })

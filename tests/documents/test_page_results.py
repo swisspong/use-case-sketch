@@ -103,8 +103,8 @@ async def test_snapshot_persists_after_settings_change_and_has_per_page_results(
     assert doc["ocr_suggested_count"] == 1
     detail = (await client.get(f"/documents/{doc['id']}")).json()
     assert detail["pages"] == [
-        {"number": 1, "ocr_suggested": False, "has_ocr": False, "text_passed": True},
-        {"number": 2, "ocr_suggested": True, "has_ocr": False, "text_passed": False},
+        {"number": 1, "ocr_suggested": False, "has_ocr": False},
+        {"number": 2, "ocr_suggested": True, "has_ocr": False},
     ]
     await client.patch(
         "/text-quality/thresholds", json=THRESHOLDS | {"max_image_percent": 49}
@@ -253,7 +253,7 @@ async def test_any_single_failed_rule_is_persisted_as_an_ocr_suggestion(
     assert page["parser"]["quality"]["failed"] == failed
     detail = (await client.get(f"/documents/{doc['id']}")).json()
     assert detail["pages"][0]["ocr_suggested"] is bool(failed)
-    assert detail["pages"][0]["text_passed"] is (not failed)
+    assert "text_passed" not in detail["pages"][0]
 
 
 async def test_existing_minimum_thai_snapshot_and_results_are_returned_unchanged(

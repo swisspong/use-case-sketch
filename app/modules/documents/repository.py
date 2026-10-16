@@ -40,7 +40,7 @@ class DocumentRepo:
         return [document for document, _ in rows if document is not None], rows[0][1]
 
     async def get(self, document_id: uuid.UUID) -> Document | None:
-        return await self._session.get(Document, document_id)
+        return await self._session.get(Document, document_id, populate_existing=True)
 
     async def get_pdf(self, document_id: uuid.UUID) -> bytes | None:
         return await self._session.scalar(
@@ -76,7 +76,6 @@ class DocumentRepo:
                 "number": p.number,
                 "ocr_suggested": not p.quality["passed"],
                 "has_ocr": p.ocr is not None,
-                "text_passed": p.text_passed,
             }
             for p in pages
         ]
@@ -94,6 +93,11 @@ class DocumentRepo:
         )
 
     async def save_ocr(self, document_id: uuid.UUID, number: int, ocr: dict) -> None:
+        # Lock the document first so concurrent saves recount one after another
+        # (each recount then sees the other's committed page).
+        await self._session.execute(
+            select(Document.id).where(Document.id == document_id).with_for_update()
+        )
         # Overwrites only the OCR column: concurrent reruns keep the last success.
         await self._session.execute(
             update(DocumentPage)
@@ -101,4 +105,20 @@ class DocumentRepo:
                 DocumentPage.document_id == document_id, DocumentPage.number == number
             )
             .values(ocr=ocr)
+        )
+        # A page stops being suggested once it has any OCR; OCR quality is not judged.
+        still_suggested = (
+            select(func.count())
+            .where(
+                DocumentPage.document_id == document_id,
+                DocumentPage.quality["passed"].as_boolean().is_(False),
+                DocumentPage.ocr.is_(None),
+            )
+            .scalar_subquery()
+        )
+        await self._session.execute(
+            update(Document)
+            .where(Document.id == document_id)
+            .values(ocr_suggested_count=still_suggested)
+            .execution_options(synchronize_session=False)
         )

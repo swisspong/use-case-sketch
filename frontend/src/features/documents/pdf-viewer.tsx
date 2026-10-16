@@ -270,10 +270,19 @@ export function PdfViewer({
             {Array.from({ length: count }, (_, i) => {
               const page = pages[i]
               const n = i + 1
+              // OCR'd pages are done whatever the OCR text scores; the criteria
+              // only judge the parser text of pages without OCR.
+              const status = !page
+                ? null
+                : page.has_ocr
+                  ? { label: "OCR แล้ว", dot: "bg-blue-500" }
+                  : page.ocr_suggested
+                    ? { label: "แนะนำ OCR", dot: "bg-amber-500" }
+                    : { label: "ผ่านเกณฑ์", dot: "bg-emerald-500" }
               return (
                 <button
                   key={n}
-                  aria-label={`หน้า ${n}${page ? (page.text_passed ? " ผ่านเกณฑ์" : " แนะนำ OCR") : ""}`}
+                  aria-label={`หน้า ${n}${status ? ` ${status.label}` : ""}`}
                   aria-current={number === n ? "page" : undefined}
                   onClick={() => onPage(n)}
                   className={`block rounded-sm p-1 text-xs ${number === n ? "ring-2 ring-zinc-900" : "hover:ring-1 hover:ring-zinc-400"}`}
@@ -282,7 +291,7 @@ export function PdfViewer({
                   <span className="mt-1 flex items-center justify-center gap-1">
                     <span
                       aria-hidden
-                      className={`size-1.5 rounded-full ${!page ? "bg-zinc-400" : page.text_passed ? "bg-emerald-500" : "bg-amber-500"}`}
+                      className={`size-1.5 rounded-full ${status?.dot ?? "bg-zinc-400"}`}
                     />
                     {n}
                   </span>

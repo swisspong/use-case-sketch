@@ -118,23 +118,26 @@ function QualityTable({
   quality,
   thresholds,
   label,
+  judged = true,
 }: {
   rows: Criterion[]
   quality: Quality
   thresholds: Thresholds
   label: string
+  // OCR values are shown for reference only; the criteria judge the parser text.
+  judged?: boolean
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border">
       <table aria-label={label} className="w-full text-sm">
         <tbody>
           {rows.map((c) => {
-            const failed = quality.failed.includes(c.key)
+            const failed = judged && quality.failed.includes(c.key)
             return (
               <tr key={c.key} className="border-b last:border-b-0">
                 <th scope="row" className="px-3 py-3 text-left font-normal">
                   <span className="flex items-center gap-2">
-                    <StatusIcon passed={!failed} />
+                    {judged && <StatusIcon passed={!failed} />}
                     {c.label}
                   </span>
                 </th>
@@ -181,14 +184,14 @@ function CompareTable({
   ocr: Quality
   thresholds: Thresholds
 }) {
-  const cell = (quality: Quality, c: Criterion) => {
-    const failed = quality.failed.includes(c.key)
+  const cell = (quality: Quality, c: Criterion, judged: boolean) => {
+    const failed = judged && quality.failed.includes(c.key)
     return (
       <td
         className={`px-2 py-3 text-right font-medium whitespace-nowrap sm:px-3 ${failed ? "text-red-600" : ""}`}
       >
         <span className="inline-flex items-center gap-1.5">
-          <StatusIcon passed={!failed} />
+          {judged && <StatusIcon passed={!failed} />}
           {value(quality, c)}
         </span>
       </td>
@@ -196,7 +199,7 @@ function CompareTable({
   }
   return (
     <div className="overflow-x-auto rounded-lg border">
-      <table aria-label="เทียบเกณฑ์ผลเดิมกับ OCR" className="w-full text-sm">
+      <table aria-label="เทียบผลเดิมกับ OCR" className="w-full text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr className="border-b">
             <th className="px-3 py-2 text-left font-normal">เกณฑ์</th>
@@ -217,8 +220,8 @@ function CompareTable({
                   {c.percent ? "%" : ""}
                 </span>
               </th>
-              {cell(parser, c)}
-              {cell(ocr, c)}
+              {cell(parser, c, true)}
+              {cell(ocr, c, false)}
             </tr>
           ))}
           <tr className="bg-muted/40">
@@ -228,9 +231,7 @@ function CompareTable({
             <td className="px-2 py-2 text-right sm:px-3">
               <Summary quality={parser} />
             </td>
-            <td className="px-2 py-2 text-right sm:px-3">
-              <Summary quality={ocr} />
-            </td>
+            <td className="px-2 py-2 sm:px-3" />
           </tr>
         </tbody>
       </table>
@@ -376,7 +377,7 @@ export function Results({
   number: number
   onMissing: () => void
   onMissingDocument: () => void
-  onOcrSaved: (number: number, textPassed: boolean) => void
+  onOcrSaved: (number: number) => void
 }) {
   const [state, setState] = useState<{
     id: string
@@ -461,7 +462,7 @@ export function Results({
           const result = await ocrPage(id, page, presetId)
           if (result.status === "ok") {
             setSaved((current) => ({ ...current, [page]: result.ocr }))
-            onOcrSaved(page, result.text_passed)
+            onOcrSaved(page)
             setTabState({ number: page, tab: "compare" })
             setOcr(null)
           } else
@@ -743,8 +744,8 @@ export function Results({
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-4">
           <h2 className="font-semibold">ผลลัพธ์ · หน้า {number}</h2>
           {runningBadge || (
-            <Badge variant="outline" className="text-emerald-700">
-              <CheckCircle2 className="size-3 text-emerald-600" />
+            <Badge variant="outline" className="text-muted-foreground">
+              <CheckCircle2 className="size-3 text-blue-500" />
               OCR แล้ว
             </Badge>
           )}
@@ -786,7 +787,6 @@ export function Results({
                 title={`OCR · ${latest.model_id}`}
                 text={latest.text}
                 copyLabel="คัดลอกข้อความ OCR"
-                badge={<PassBadge passed={latest.quality.passed} />}
               />
             </div>
           </TabsContent>
@@ -813,20 +813,20 @@ export function Results({
           <TabsContent value="ocr" className="space-y-5">
             <div>
               <h3 className="mb-2 text-xs text-muted-foreground">
-                คุณภาพข้อความเทียบเกณฑ์
+                ค่าวัดข้อความ OCR
               </h3>
               <QualityTable
                 rows={rows}
                 quality={latest.quality}
                 thresholds={result.thresholds}
-                label="คุณภาพ OCR เทียบเกณฑ์"
+                label="ค่าวัดข้อความ OCR"
+                judged={false}
               />
             </div>
             <TextBox
               title={`OCR · ${latest.model_id}`}
               text={latest.text}
               copyLabel="คัดลอกข้อความ OCR"
-              badge={<PassBadge passed={latest.quality.passed} />}
               tall
             />
           </TabsContent>

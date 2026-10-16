@@ -113,7 +113,8 @@ async def test_success_saves_latest_ocr_and_updates_page_summary(
         base_url="https://provider.example/v1",
         api_key=DATA["api_key"],
     )
-    assert result.status == "ok" and result.page == 2 and result.text_passed
+    assert result.status == "ok" and result.page == 2
+    assert "text_passed" not in result.model_dump()
     assert result.ocr.preset_name == DATA["name"] and result.ocr.model_id == "model"
     assert result.ocr.text == "Hello OCR"
     # Same snapshot and the parser's image coverage: OCR only changes the text.
@@ -127,13 +128,9 @@ async def test_success_saves_latest_ocr_and_updates_page_summary(
     )
     assert page["parser"]["text"] == "" and not page["parser"]["quality"]["passed"]
     detail = (await client.get(f"/documents/{doc.id}")).json()
-    assert detail["pages"][1] == {
-        "number": 2,
-        "ocr_suggested": True,
-        "has_ocr": True,
-        "text_passed": True,
-    }
-    assert detail["ocr_suggested_count"] == 1
+    assert detail["pages"][1] == {"number": 2, "ocr_suggested": True, "has_ocr": True}
+    # The OCR'd page no longer needs OCR, whatever the OCR text scores.
+    assert detail["ocr_suggested_count"] == 0
     assert preset["is_default"]
 
 
@@ -145,16 +142,17 @@ async def test_rerun_replaces_result_and_failure_keeps_previous(
     await run(session, uow, presets, doc.id)
     poor = OcrReading(text="x")
     result, *_ = await run(session, uow, presets, doc.id, reader=FakeOcrReader(poor))
-    assert result.status == "ok" and result.text_passed is False
-    assert result.ocr.quality.failed == ["min_text_chars"]
+    assert result.status == "ok"
+    assert result.ocr.quality.failed == ["min_text_chars"]  # shown, never judged
     failed = OcrReading(reason="provider_timeout")
     result, *_ = await run(session, uow, presets, doc.id, reader=FakeOcrReader(failed))
     assert result.status == "failed" and result.reason == "provider_timeout"
-    assert result.ocr is None and result.text_passed is None
+    assert result.ocr is None
     page = (await client.get(f"/documents/{doc.id}/pages/2")).json()
     assert page["ocr"]["text"] == "x"
     detail = (await client.get(f"/documents/{doc.id}")).json()
-    assert detail["pages"][1]["has_ocr"] and not detail["pages"][1]["text_passed"]
+    assert detail["pages"][1]["has_ocr"]
+    assert detail["ocr_suggested_count"] == 0  # reruns never count a page twice
 
 
 async def test_each_ocr_logs_one_traceable_line(client, session, uow, presets, caplog):
@@ -178,7 +176,7 @@ async def test_each_ocr_logs_one_traceable_line(client, session, uow, presets, c
     assert "failed" in lines[2] and "pass1 invalid_output" in lines[2]
 
 
-async def test_passing_parser_page_stays_passed_even_if_ocr_fails_quality(
+async def test_ocr_of_a_passing_parser_page_leaves_the_suggested_count(
     client, session, uow, presets
 ):
     await create(client)
@@ -186,7 +184,28 @@ async def test_passing_parser_page_stays_passed_even_if_ocr_fails_quality(
     result, *_ = await run(
         session, uow, presets, doc.id, page=1, reader=FakeOcrReader(OcrReading(text=""))
     )
-    assert result.status == "ok" and result.text_passed is True
+    assert result.status == "ok"
+    detail = (await client.get(f"/documents/{doc.id}")).json()
+    assert detail["ocr_suggested_count"] == 1
+    assert detail["pages"][0] == {"number": 1, "ocr_suggested": False, "has_ocr": True}
+
+
+async def test_failed_ocr_leaves_the_suggested_count(client, session, uow, presets):
+    await create(client)
+    doc = await seed(session)
+    failed = OcrReading(reason="provider_error")
+    await run(session, uow, presets, doc.id, reader=FakeOcrReader(failed))
+    detail = (await client.get(f"/documents/{doc.id}")).json()
+    assert detail["ocr_suggested_count"] == 1 and not detail["pages"][1]["has_ocr"]
+
+
+async def test_suggested_count_drops_once_per_ocr_page(client, session, uow, presets):
+    await create(client)
+    doc = await seed(session, texts=("", "", ""))
+    for page, left in ((1, 2), (1, 2), (3, 1)):
+        await run(session, uow, presets, doc.id, page=page)
+        detail = (await client.get(f"/documents/{doc.id}")).json()
+        assert detail["ocr_suggested_count"] == left
 
 
 async def test_explicit_preset_is_used_and_default_is_resolved(
@@ -273,8 +292,8 @@ async def test_endpoint_success_and_failed_bodies(ocr_client, session):
     )
     assert r.status_code == 200, r.text
     body = r.json()
-    assert set(body) == {"page", "status", "ocr", "text_passed", "duration_ms"}
-    assert body["status"] == "ok" and body["text_passed"] is True
+    assert set(body) == {"page", "status", "ocr", "duration_ms"}
+    assert body["status"] == "ok"
     assert set(body["ocr"]) == {
         "preset_name",
         "model_id",
