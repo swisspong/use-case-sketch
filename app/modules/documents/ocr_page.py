@@ -17,7 +17,8 @@ SPEC
       merge into numbers; a full-width title row has no label and empty labels are removed.
 - [x] Strike/underline marks (~~, ++) that the transcription pass adds on its own are removed.
       Struck/underlined text is instead found in pixels; a mark pass wraps the boxed words
-      in ~~/++, kept only with one pair per detected line and the text unchanged (adapter).
+      in ~~/++, kept only if they form exactly the detected runs (boxes on consecutive
+      lines may be one run) and the text is unchanged (adapter).
 - [x] Each OCR logs one line (document, page, preset, steps; never provider text): WARNING
       when it failed or a pass was skipped/rejected, INFO otherwise.
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).

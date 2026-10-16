@@ -23,6 +23,8 @@ class EditLine:
     bottom: int
     left: int
     right: int
+    # Lines that continue one marked passage onto the next text line share a run.
+    run: int = 0
 
 
 def find_edit_lines(png: bytes) -> list[EditLine]:
@@ -81,9 +83,7 @@ def find_edit_lines(png: bytes) -> list[EditLine]:
             continue
         if density(top - gap - band, top - gap, left, right) < 0.04:  # no text on it
             continue
-        if corner(left, top, bottom) or corner(
-            right - 1, top, bottom
-        ):  # a table corner
+        if corner(left, top, bottom) or corner(right - 1, top, bottom):  # table corner
             continue
         # Text must sit on most of the line; a border runs on past the text.
         step = 3 * band
@@ -96,8 +96,51 @@ def find_edit_lines(png: bytes) -> list[EditLine]:
             continue
         below = density(bottom + gap, bottom + gap + band, left, right)
         kind = "strike" if below >= 0.04 else "underline"
-        found.append(EditLine(kind, top, bottom, left, right))
-    return found
+        # Where the text of this line starts and ends inside the cell (ragged right).
+        text_rows = (
+            range(top - band, bottom + band)
+            if kind == "strike"
+            else range(top - 2 * band, top - gap)
+        )
+        lo, hi = cell_left + 4, cell_right - 4
+        firsts, lasts = [], []
+        for y in text_rows:
+            if 0 <= y < h and (first := rows[y].find(1, lo, hi)) >= 0:
+                firsts.append(first)
+                lasts.append(rows[y].rfind(1, lo, hi))
+        found.append(
+            (
+                EditLine(kind, top, bottom, left, right),
+                cell_left,
+                bool(firsts) and left - min(firsts) <= w // 60,
+                bool(lasts) and max(lasts) - right <= w // 60,
+            )
+        )
+    return _number_runs(found, max_pitch=h // 25)
+
+
+def _number_runs(found, max_pitch: int) -> list[EditLine]:
+    """A line that reaches the end of its text line, followed on the next text line of
+    the same cell by a line of the same kind starting at the line start, is one run."""
+    lines: list[EditLine] = []
+    previous: dict[tuple[str, int], tuple[EditLine, bool]] = {}
+    run = -1
+    for line, cell, starts, ends in sorted(found, key=lambda f: (f[1], f[0].top)):
+        before = previous.get((line.kind, cell))
+        continues = (
+            before is not None
+            and before[1]
+            and starts
+            and 0 < line.top - before[0].top <= max_pitch
+        )
+        if not continues:
+            run += 1
+        numbered = EditLine(
+            **{**line.__dict__, "run": before[0].run if continues else run}
+        )
+        lines.append(numbered)
+        previous[(line.kind, cell)] = (numbered, ends)
+    return sorted(lines, key=lambda line: (line.top, line.left))
 
 
 def draw_edit_boxes(png: bytes, lines: list[EditLine]) -> bytes:

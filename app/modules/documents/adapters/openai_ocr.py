@@ -9,8 +9,8 @@ Pass 2 runs with reasoning_effort "low"; a missing table separator row is repair
 empty labels are dropped. Superscript footnote markers are written [^n] so they never
 merge into numbers (ซีเซียม-๑๓๗[^๔], not ๑๓๗๔). When the pixel detector finds struck or
 underlined text, a third call gets the page with those spots boxed and wraps them in
-~~ ~~ / ++ ++; rules.apply_edit_marks keeps the marks only if there is one pair per box
-and the text is unchanged. One model call that both reads and
+~~ ~~ / ++ ++; rules.apply_edit_marks keeps the marks only if they form exactly the runs
+the detector found (boxes on consecutive lines can be one run) and the text is unchanged. One model call that both reads and
 structures misreads digits (๗๒.๙๐ -> ๓๒.๙๐), so the passes stay separate
 (docs/ocr-table-structure-experiment.md).
 
@@ -173,7 +173,9 @@ class OpenAIOcrReader:
             return text, "marks none found"
         struck = sum(line.kind == "strike" for line in lines)
         underlined = len(lines) - struck
-        boxes = f"{struck}+{underlined}"
+        struck_runs = len({line.run for line in lines if line.kind == "strike"})
+        underlined_runs = len({line.run for line in lines if line.kind == "underline"})
+        boxes = f"{struck_runs}+{underlined_runs} runs in {struck}+{underlined} boxes"
         boxed = await asyncio.to_thread(draw_edit_boxes, image, lines)
         url = "data:image/png;base64," + base64.b64encode(boxed).decode("ascii")
         try:
@@ -189,13 +191,13 @@ class OpenAIOcrReader:
                     reasoning_effort="low",
                 )
         except TimeoutError:
-            return text, f"marks deadline ({boxes} boxes)"
+            return text, f"marks deadline ({boxes})"
         except _Failed as e:
-            return text, f"marks {e.reason} ({boxes} boxes)"
-        applied = apply_edit_marks(text, marked, struck, underlined)
+            return text, f"marks {e.reason} ({boxes})"
+        applied = apply_edit_marks(text, marked, struck_runs, underlined_runs)
         if applied is None:
             found = f"{marked.count('~~') // 2}+{marked.count('++') // 2}"
-            return text, f"marks rejected ({found} marked, {boxes} boxes)"
+            return text, f"marks rejected ({found} pairs marked; {boxes})"
         return applied, f"marks applied ({boxes})"
 
     async def _complete(

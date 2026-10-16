@@ -43,7 +43,9 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
 - `adapters/edit_mark_detector.py`: finds struck and underlined text from pixels (no
   model). When it finds some and time is left before the deadline, a third call marks the
   boxed words with `~~`/`++` (`reasoning_effort: "low"`). `rules.apply_edit_marks` keeps
-  the marks only with exactly one pair per detected line and the text unchanged
+  the marks only if, once marks split by whitespace are joined, they form exactly the
+  runs the detector found (a struck passage over several lines is one run) and the text
+  is unchanged
   (see `docs/ocr-table-structure-experiment.md`). No automatic retries, because the user
   retries explicitly. A truncated reply (`finish_reason=length`) or a malformed reply in
   pass 1 is `invalid_output`. Credentials and provider text are never logged.

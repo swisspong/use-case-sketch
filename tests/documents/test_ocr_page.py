@@ -591,8 +591,12 @@ async def test_ocr_adapter_reports_pass_one_failure_and_edit_mark_outcomes():
     assert reading.steps == ("pass1 invalid_output",) and reading.degraded
 
     for reply, step, degraded in (
-        ("~~วาระที่~~" + PLAIN_PAGE.removeprefix("วาระที่"), "marks applied (1+0)", False),
-        (PLAIN_PAGE, "marks rejected (0+0 marked, 1+0 boxes)", True),
+        (
+            "~~วาระที่~~" + PLAIN_PAGE.removeprefix("วาระที่"),
+            "marks applied (1+0 runs in 1+0 boxes)",
+            False,
+        ),
+        (PLAIN_PAGE, "marks rejected (0+0 pairs marked; 1+0 runs in 1+0 boxes)", True),
     ):
 
         async def handler(request, reply=reply):

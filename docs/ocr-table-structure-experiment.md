@@ -564,3 +564,40 @@ Live re-runs with these changes:
 
 Across all runs of the final mark call, 2 of 6 were rejected for a missing pair: that
 page got no marks, but never wrong ones.
+
+## Follow-up 2: count runs, not boxes, 2026-10-16
+
+User log for `f21b1414-5e9e-485d-a6a1-3f14040d26d1` (the same track-changes PDF): `pass1 ok;
+pass2 accepted; marks rejected (7+6 marked, 15+11 boxes)`, 103 s.
+
+Cause: pass 2 now writes each cell as one long line, so the transcription's lines no
+longer match the page lines. The mark call then wraps each **passage** once (7 struck,
+6 underlined, which is exactly the passages on the page), not each box per line (15+11).
+The per-box count rule rejected a likely correct result.
+
+Re-running only the mark call on the stored text 3 times: 6+6, 6+6 and 7+6 pairs. The
+7+6 run scored **16/16**. The 6+6 runs scored 14/16: an underline swallowed the struck
+`ซึ่งรับรอง`, so one strike run went missing. They should be rejected.
+
+Change:
+- **Runs in the detector:** `EditLine.run` groups the lines that continue one passage. A
+  line that reaches the end of its text line, followed on the next text line of the same
+  cell by a same-kind line starting at the line start, is one run. Line start and end
+  come from the ink of that text line, not the cell edge, because Thai lines are ragged.
+  On this page that gives 15 boxes → 7 runs (2/1/5/1/1/3/2) and 11 → 6 (1/1/2/1/2/4),
+  which matches the page.
+- **Runs in `apply_edit_marks`:** marks split only by whitespace are joined first, so
+  box-by-box and run-by-run marking count the same. The joined runs must equal the
+  detected runs exactly. The prompt still states the box counts.
+- On the 3 re-runs: 7+6 accepted at 16/16, and both 6+6 runs rejected.
+
+Live, production adapter, 110 s deadline:
+
+| Run | Total | Steps | Marks right |
+|---|---|---|---|
+| r1 | 71.6 s | `marks applied (7+6 runs in 15+11 boxes)` | 16/16 |
+| r2 | 85.3 s | same | 16/16 |
+| r3 | 90.7 s | same | 15/16: `++รายงานการ++` where only `รายงาน` is underlined |
+
+Remaining limit: a mark can end one word off while the run count still matches, which
+the check cannot see (1 of 3 runs here).
