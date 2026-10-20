@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Total provider deadline for OCR of one page, all passes (Penpot said 60 s). Dense
     # pages take 25-75 s for transcribe + structure and the edit-mark pass needs ~11 s
     # more (docs/ocr-table-structure-experiment.md); the frontend waits 150 s.
-    documents_ocr_timeout_seconds: float = Field(default=110, gt=0)
+    documents_ocr_timeout_seconds: float = Field(default=200, gt=0)
 
 
 @lru_cache

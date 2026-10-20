@@ -54,6 +54,62 @@ def test_unreadable_image_has_no_marks_and_boxes_are_drawn_in_colour():
     assert (0, 80, 255) not in colours  # no underline box
 
 
+def test_strike_box_encloses_the_struck_words():
+    # A box edge across the letters made the model miss a short struck word
+    # ("ซึ่งรับรอง", document 4b9eb986, 2026-10-16).
+    def paint(draw):
+        right = words(draw, 100, 200, 12)  # glyphs span rows 200..219
+        draw.rectangle([100, 209, right, 211], fill=0)
+
+    png = page(paint)
+    boxed = Image.open(io.BytesIO(draw_edit_boxes(png, find_edit_lines(png))))
+    red = [
+        y
+        for y in range(boxed.height)
+        if any(boxed.getpixel((x, y)) == (230, 0, 0) for x in range(90, 330))
+    ]
+    assert min(red) < 200 and max(red) > 219
+
+
+def _text_lines(draw, y, size, count):
+    """count lines of size-px glyphs drawn as two 2 px stems (no bar long enough to be
+    an edit line), one line every 2 * size px; returns their tops."""
+    tops = [y + i * 2 * size for i in range(count)]
+    for top in tops:
+        for x in range(100, 900, size):
+            for stem in (x, x + size * 7 // 10 - 2):
+                draw.rectangle([stem, top, stem + 1, top + size - 1], fill=0)
+    return tops
+
+
+def _red_rows(png: bytes) -> list[int]:
+    boxed = Image.open(io.BytesIO(png))
+    return [
+        y
+        for y in range(boxed.height)
+        if any(boxed.getpixel((x, y)) == (230, 0, 0) for x in range(90, 420))
+    ]
+
+
+def test_strike_boxes_follow_the_size_of_the_text():
+    # Box height comes from the line pitch measured on the page, not the page height:
+    # big text is not cut and small text does not reach the next line.
+    for size, y in ((40, 150), (10, 900)):
+
+        def paint(draw, size=size, y=y):
+            tops = _text_lines(draw, y, size, 4)
+            mid = tops[1] + size // 2
+            draw.rectangle([104, mid - 1, 400, mid + 1], fill=0)
+
+        png = page(paint)
+        lines = find_edit_lines(png)
+        assert [line.kind for line in lines] == ["strike"]
+        red = _red_rows(draw_edit_boxes(png, lines))
+        struck_top = y + 2 * size
+        assert struck_top - size < min(red) < struck_top  # clear of the line above
+        assert struck_top + size - 1 < max(red) < struck_top + 2 * size
+
+
 TEXT = """| ฉบับที่ ๖ โดยและพวกเรา | ร้อยละ ๔๓ |
 | --- | --- |
 ยั่งยืนอย่างมาก
@@ -64,7 +120,7 @@ def test_marks_are_copied_onto_the_text_keeping_its_spacing():
     # The mark pass re-flowed lines and dropped the table spacing; only marks move over.
     marked = "| ฉบับที่ ๖ ~~โดย~~++และพวกเรา++ | ร้อยละ ๔๓ |\n|---|---|\nยั่งยืน~~อย่างมาก~~ ~~ถึงร้อยละ ๔๓~~"
     # Two struck boxes on following lines are one run once their marks are joined.
-    assert apply_edit_marks(TEXT, marked, struck=2, underlined=1) == (
+    assert apply_edit_marks(TEXT, marked, struck=[36, 192], underlined=[108]) == (
         "| ฉบับที่ ๖ ~~โดย~~++และพวกเรา++ | ร้อยละ ๔๓ |\n| --- | --- |\n"
         "ยั่งยืน~~อย่างมาก\nถึงร้อยละ ๔๓~~"
     )
@@ -74,13 +130,15 @@ def test_marks_are_rejected_unless_counts_and_text_match_exactly():
     good = (
         "| ฉบับที่ ๖ ~~โดย~~และพวกเรา | ร้อยละ ๔๓ |\n| --- | --- |\nยั่งยืนอย่างมาก\nถึงร้อยละ ๔๓"
     )
-    assert apply_edit_marks(TEXT, good, struck=1, underlined=0)
+    assert apply_edit_marks(TEXT, good, struck=[36], underlined=[])
     # One detected line left unmarked, or a mark the detector did not see: rejected.
-    assert apply_edit_marks(TEXT, good, struck=2, underlined=0) is None
-    assert apply_edit_marks(TEXT, good, struck=1, underlined=1) is None
+    assert apply_edit_marks(TEXT, good, struck=[36, 36], underlined=[]) is None
+    assert apply_edit_marks(TEXT, good, struck=[36], underlined=[36]) is None
     changed = good.replace("๔๓", "๔๙", 1)
-    assert apply_edit_marks(TEXT, changed, struck=1, underlined=0) is None
-    assert apply_edit_marks("ภาษา C++", "ภาษา ~~C++~~", struck=1, underlined=0) is None
+    assert apply_edit_marks(TEXT, changed, struck=[36], underlined=[]) is None
+    assert (
+        apply_edit_marks("ภาษา C++", "ภาษา ~~C++~~", struck=[36], underlined=[]) is None
+    )
 
 
 def test_marking_box_by_box_or_run_by_run_counts_the_same():
@@ -88,12 +146,24 @@ def test_marking_box_by_box_or_run_by_run_counts_the_same():
     per_run = (
         "| ฉบับที่ ๖ โดยและพวกเรา | ร้อยละ ๔๓ |\n| --- | --- |\n~~ยั่งยืนอย่างมาก\nถึงร้อยละ ๔๓~~"
     )
-    expected = apply_edit_marks(TEXT, per_run, struck=1, underlined=0)
+    expected = apply_edit_marks(TEXT, per_run, struck=[240], underlined=[])
     assert (
-        expected and apply_edit_marks(TEXT, per_box, struck=1, underlined=0) == expected
+        expected
+        and apply_edit_marks(TEXT, per_box, struck=[240], underlined=[]) == expected
     )
     # Seen live: an underline run swallowed a struck word, leaving one strike run short.
-    assert apply_edit_marks(TEXT, per_run, struck=2, underlined=0) is None
+    assert apply_edit_marks(TEXT, per_run, struck=[240, 36], underlined=[]) is None
+
+
+def test_a_mark_on_text_too_short_or_long_for_its_box_is_rejected():
+    # Seen live (document 4b9eb986): the underline swallowed the struck "ซึ่งรับรอง" and
+    # the strike moved to the next word "โดย". Counts and text still matched.
+    text = "ต่างถิ่นรุกรานของโลก ซึ่งรับรองโดยเวที"
+    # Run widths measured on that page: underline 223 px, strike 97 px.
+    good = "++ต่างถิ่นรุกรานของโลก++ ~~ซึ่งรับรอง~~โดยเวที"
+    assert apply_edit_marks(text, good, struck=[97], underlined=[223]) == good
+    shifted = "++ต่างถิ่นรุกรานของโลก ซึ่งรับรอง++~~โดย~~เวที"
+    assert apply_edit_marks(text, shifted, struck=[97], underlined=[223]) is None
 
 
 def test_lines_continuing_a_passage_on_the_next_text_line_form_one_run():

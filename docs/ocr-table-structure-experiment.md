@@ -601,3 +601,49 @@ Live, production adapter, 110 s deadline:
 
 Remaining limit: a mark can end one word off while the run count still matches, which
 the check cannot see (1 of 3 runs here).
+
+## Deadline 110 s -> 200 s (2026-10-16)
+
+Document `4b9eb986-…` (strikethrough p34, 7+6 runs in 15+11 boxes): two of three live
+runs ended `marks deadline` at ~110.5 s, because pass 1 + pass 2 used almost the whole
+110 s and the mark pass needs 12-28 s. `DOCUMENTS_OCR_TIMEOUT_SECONDS` 110 → **200**; the
+frontend now waits 240 s (200 s OCR, up to 30 s render, then the save).
+
+## Mark boxes clear of the letters (2026-10-16)
+
+With 200 s the same document reached the mark pass but was `marks rejected (14+11 pairs
+marked; 7+6 runs in 15+11 boxes)`. Re-running only the mark pass on the saved text: 3 of
+6 runs failed, every time by leaving out the short struck word `ซึ่งรับรอง`, which sits
+right after an underline box. The red box was only ±h/180 around the strike line, so its
+edges cut through the letters and tone marks. Boxes now start h/72 above the line (strike
+boxes end h/120 below it) with 2 px edges: 8 of 8 runs applied, all with `~~ซึ่งรับรอง~~`
+(mark pass 23-37 s with 8 calls in parallel).
+
+## Box size from the measured line pitch (2026-10-16)
+
+Box sizes were fractions of the page height, so big text was cut and small text reached
+the next line. `find_edit_lines` now measures each line's text pitch (first strong peak
+of the autocorrelation of ink per row in its cell, ±h/10 around it; a weak peak at half
+that pitch wins, since text near a header repeats strongly at twice the pitch) and boxes
+are 0.63 pitch above the line, 0.37 (strike) / 0.14 (underline) below; 0 = no repeat ->
+h/46. On document `4b9eb986-…` every line measures 43 px except the first (42), so boxes
+match the tested ones except that box, 1 px shorter.
+
+That 1 px mattered: same text, 8 runs each at the same time, previous image 7/8 applied
+with `ซึ่งรับรอง` struck 8/8, new image 5/8 applied with it struck 2/8 (once more it is
+swallowed by the underline before it). The mark pass is fragile where a red box follows a
+blue one; earlier 8/8 and 6/6 results were partly this exact image.
+
+## Run length must fit the box width (2026-10-16)
+
+The count check let a wrong answer through: the underline swallowed `ซึ่งรับรอง` and the
+strike moved to the next word `โดย`, so there were still 7+6 runs and the text was
+unchanged. `apply_edit_marks` now gets each run's width in px (sum of its lines) instead
+of a count. It counts the letters in each marked run (no whitespace, no combining Thai
+vowel/tone marks), sets px per letter from the whole page, pairs runs and boxes of one
+kind by size (box and text order can differ in tables), and rejects a run whose letters
+are off by more than 1.6x. Correct runs here were 0.89-1.16; the moved strike was 0.47.
+
+Replaying the 60 saved mark-pass answers for this page: count-only check 31 correct,
+3 wrong accepted, 26 rejected; with the width check 31 correct, 0 wrong accepted,
+29 rejected.

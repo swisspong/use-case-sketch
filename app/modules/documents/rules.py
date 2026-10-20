@@ -1,6 +1,7 @@
 """Deterministic quality heuristics. No dictionary or language model is consulted."""
 
 import re
+import unicodedata
 from collections import Counter
 
 from app.modules.documents.text_quality import assess_problem_characters
@@ -175,17 +176,53 @@ def drop_empty_labels(plain: str, structured: str) -> str:
 _EDIT_MARK = re.compile(r"(~~|\+\+)")
 
 
+# How far a run's letters may stray from what its box width predicts. Correct runs on
+# document 4b9eb986 were 0.89-1.16; a strike moved to the wrong word was 0.47.
+_RUN_LENGTH_TOLERANCE = 1.6
+
+
+def _letters(text: str) -> int:
+    """Letters that take width on the line: no whitespace, no Thai vowel/tone marks."""
+    return sum(not c.isspace() and unicodedata.category(c) != "Mn" for c in text)
+
+
+def _runs_fit_boxes(marked: str, struck: list[int], underlined: list[int]) -> bool:
+    """Each run's letters roughly match its box width at this page's letter width.
+
+    Reading order of boxes and text can differ (table columns), so runs and boxes are
+    paired by size within each kind."""
+    runs: dict[str, list[int]] = {"~~": [], "++": []}
+    open_at: dict[str, int] = {}
+    for m in _EDIT_MARK.finditer(marked):
+        mark = m.group()
+        if mark in open_at:
+            runs[mark].append(_letters(marked[open_at.pop(mark) : m.start()]))
+        else:
+            open_at[mark] = m.end()
+    letters = sum(map(sum, runs.values()))
+    if not letters:
+        return False
+    px_per_letter = (sum(struck) + sum(underlined)) / letters
+    for widths, found in ((struck, runs["~~"]), (underlined, runs["++"])):
+        for width, count in zip(sorted(widths), sorted(found), strict=True):
+            ratio = count * px_per_letter / max(1, width)
+            if not 1 / _RUN_LENGTH_TOLERANCE <= ratio <= _RUN_LENGTH_TOLERANCE:
+                return False
+    return True
+
+
 def apply_edit_marks(
-    text: str, marked: str, struck: int, underlined: int
+    text: str, marked: str, struck: list[int], underlined: list[int]
 ) -> str | None:
     """Copy the ~~struck~~ / ++underlined++ marks of the mark pass onto text.
 
-    struck and underlined are the numbers of runs the detector found (a run may span
-    several lines). Marks split only by whitespace are joined first, so marking box by
-    box or run by run both count the same. The marks are kept only when the joined runs
-    match those numbers exactly and removing them gives back the text (whitespace
-    ignored); otherwise None. They are re-inserted into text itself, so its spacing and
-    tables are untouched."""
+    struck and underlined are the widths in px of the runs the detector found (a run may
+    span several lines; its width is the sum). Marks split only by whitespace are joined
+    first, so marking box by box or run by run both count the same. The marks are kept
+    only when the joined runs match the number of runs exactly, each run's length fits its
+    box width, and removing them gives back the text (whitespace ignored); otherwise
+    None. They are re-inserted into text itself, so its spacing and tables are
+    untouched."""
     if _EDIT_MARK.search(text) or marked.count("~~") % 2 or marked.count("++") % 2:
         return None
     if re.sub(r"\s", "", _EDIT_MARK.sub("", marked)) != re.sub(r"\s", "", text):
@@ -211,6 +248,8 @@ def apply_edit_marks(
     out.append(text[i:])
     joined = re.sub(r"~~(\s*)~~", r"\1", "".join(out))
     joined = re.sub(r"\+\+(\s*)\+\+", r"\1", joined)
-    if joined.count("~~") != 2 * struck or joined.count("++") != 2 * underlined:
+    if joined.count("~~") != 2 * len(struck) or joined.count("++") != 2 * len(
+        underlined
+    ):
         return None
-    return joined
+    return joined if _runs_fit_boxes(joined, struck, underlined) else None

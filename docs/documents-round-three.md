@@ -32,7 +32,7 @@ Storage: nullable JSONB `document_pages.ocr` (migration `20261016_page_ocr`).
 - `adapters/page_renderer.py`: PDFium (pypdfium2) in a killable subprocess, 200 dpi, longest
   side ≤ 2000 px, deadline `DOCUMENTS_PARSE_TIMEOUT_SECONDS`. Failure → 500 SYS_002.
 - `adapters/openai_ocr.py`: two Chat Completions requests with the page as a PNG data URL,
-  sharing the total deadline `DOCUMENTS_OCR_TIMEOUT_SECONDS` (110; the frontend waits 150 s). Pass 1 transcribes
+  sharing the total deadline `DOCUMENTS_OCR_TIMEOUT_SECONDS` (200; the frontend waits 240 s). Pass 1 transcribes
   plain text. Pass 2 restructures that text into Markdown pipe tables and labelled
   layout-frame blocks. It is kept only when `rules.same_content` confirms the text is
   unchanged; otherwise pass 1 is returned. Pass 2 uses `reasoning_effort: "low"`, and

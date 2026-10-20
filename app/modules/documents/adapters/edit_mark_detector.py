@@ -25,6 +25,8 @@ class EditLine:
     right: int
     # Lines that continue one marked passage onto the next text line share a run.
     run: int = 0
+    # Distance between text lines around this line (scales with the font); 0 = unknown.
+    pitch: int = 0
 
 
 def find_edit_lines(png: bytes) -> list[EditLine]:
@@ -108,9 +110,10 @@ def find_edit_lines(png: bytes) -> list[EditLine]:
             if 0 <= y < h and (first := rows[y].find(1, lo, hi)) >= 0:
                 firsts.append(first)
                 lasts.append(rows[y].rfind(1, lo, hi))
+        pitch = _line_pitch(rows, top - h // 10, bottom + h // 10, lo, hi, h)
         found.append(
             (
-                EditLine(kind, top, bottom, left, right),
+                EditLine(kind, top, bottom, left, right, pitch=pitch),
                 cell_left,
                 bool(firsts) and left - min(firsts) <= w // 60,
                 bool(lasts) and max(lasts) - right <= w // 60,
@@ -147,18 +150,56 @@ def draw_edit_boxes(png: bytes, lines: list[EditLine]) -> bytes:
     """The page with a red box around struck text and a blue box around underlined text."""
     page = Image.open(io.BytesIO(png)).convert("RGB")
     draw = ImageDraw.Draw(page)
-    up, down = page.height // 90, page.height // 300
+    # Edges stay clear of the letters (Thai tone marks included): a box edge across a
+    # short struck word made the model miss it (ซึ่งรับรอง: 3 of 6 runs vs 8 of 8).
+    # Sizes are fractions of the measured line pitch, so they follow the font size; at
+    # the 43 px pitch of a 16 pt page they are the tested 27 px above, 16/6 px below.
     for line in lines:
+        pitch = line.pitch or page.height // 46
+        above = round(0.63 * pitch)
         if line.kind == "strike":
-            box, colour = (line.top - up // 2, line.bottom + up // 2), (230, 0, 0)
+            box = (line.top - above, line.bottom + round(0.37 * pitch))
+            colour = (230, 0, 0)
         else:
-            box, colour = (line.top - up, line.bottom + down), (0, 80, 255)
+            box = (line.top - above, line.bottom + round(0.14 * pitch))
+            colour = (0, 80, 255)
         draw.rectangle(
-            [line.left - 4, box[0], line.right + 4, box[1]], outline=colour, width=3
+            [line.left - 4, box[0], line.right + 4, box[1]], outline=colour, width=2
         )
     out = io.BytesIO()
     page.save(out, format="PNG")
     return out.getvalue()
+
+
+def _line_pitch(rows: list[bytes], y0: int, y1: int, lo: int, hi: int, h: int) -> int:
+    """Text line pitch in rows y0..y1, columns lo..hi: the first strong peak of the
+    autocorrelation of ink per row. 0 when the text does not repeat (one line)."""
+    profile = [rows[y].count(1, lo, hi) for y in range(max(0, y0), min(h, y1))]
+    if len(profile) < 4:
+        return 0
+    mean = sum(profile) / len(profile)
+    p = [v - mean for v in profile]
+    var = sum(v * v for v in p)
+    if not var:
+        return 0
+    shortest, longest = max(2, h // 200), min(h // 15, len(p) // 2 - 1)
+    ac = [
+        sum(p[i] * p[i + k] for i in range(len(p) - k)) / var
+        for k in range(longest + 2)
+    ]
+
+    def peak(k: int) -> bool:
+        return ac[k] >= ac[k - 1] and ac[k] >= ac[k + 1]
+
+    for k in range(shortest, longest + 1):
+        if peak(k) and ac[k] > 0.3:
+            # Text near a header or blank area repeats weakly at the true pitch and
+            # strongly at twice it (seen: 87 instead of 43 px, 0.14 at 43). Smaller
+            # bumps at half the pitch are letter shapes (seen: 0.04 at 20 px).
+            half = [j for j in range(k // 2 - 2, k // 2 + 3) if j >= shortest]
+            j = max(half, key=lambda j: ac[j], default=k)
+            return j if j != k and peak(j) and ac[j] >= 0.1 else k
+    return 0
 
 
 def _join_collinear(segments: list[list[int]], max_gap: int) -> list[list[int]]:

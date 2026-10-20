@@ -20,7 +20,8 @@ SPEC
 - [x] Strike/underline marks (~~, ++) that the transcription pass adds on its own are removed.
       Struck/underlined text is instead found in pixels; a mark pass wraps the boxed words
       in ~~/++, kept only if they form exactly the detected runs (boxes on consecutive
-      lines may be one run) and the text is unchanged (adapter).
+      lines may be one run), each run's length fits its box width, and the text is
+      unchanged (adapter).
 - [x] Each OCR logs one line (document, page, preset, steps; never provider text): WARNING
       when it failed or a pass was skipped/rejected, INFO otherwise.
 - [x] POST /documents/{id}/ocr returns OcrResult / mapped errors (endpoint).

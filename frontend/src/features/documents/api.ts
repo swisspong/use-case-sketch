@@ -332,8 +332,8 @@ export async function ocrPage(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ page, preset_id: presetId }),
-        // Provider deadline is 110 s per page (all passes); render can take 30 s more.
-        signal: AbortSignal.timeout(150000),
+        // Provider deadline is 200 s per page (all passes); render can take 30 s more.
+        signal: AbortSignal.timeout(240000),
       }
     )
   } catch {
