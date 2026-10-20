@@ -2,7 +2,17 @@
 name = "registration-sketch"
 version = "0.0.0"
 requires-python = ">=3.10"
-dependencies = ["email-validator>=2.2,<3"]
+dependencies = [
+    "email-validator>=2.2,<3", "pypdf>=6.19,<7", "pypdfium2>=5.14,<6", "pillow>=12,<13",
+]
+
+[project.scripts]
+extract-pdf-text = "contexts.document_processing.v1.presentation.extract_pdf_text_cli:main"
+extract-pdf-text-v1 = "contexts.document_processing.v1.presentation.extract_pdf_text_cli:main"
+extract-pdf-text-v2 = "contexts.document_processing.v2.presentation.extract_pdf_text_cli:main"
+repair-extracted-text-v2 = "contexts.document_processing.v2.presentation.repair_extracted_text_cli:main"
+extract-pdf-text-v3 = "contexts.document_processing.v3.presentation.extract_pdf_text_cli:main"
+ocr-document-pages-v3 = "contexts.document_processing.v3.presentation.ocr_document_pages_cli:main"
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -12,5 +22,6 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit"]
+addopts = "--import-mode=importlib"
+testpaths = ["tests/unit", "tests/integration"]
 pythonpath = ["src"]

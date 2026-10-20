@@ -1,0 +1,72 @@
+[project]
+name = "app"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.121.1",
+  "uvicorn[standard]",
+  "sqlalchemy[asyncio]>=2.0",
+  "asyncpg",
+  "alembic",
+  "pydantic-settings",
+  "pyjwt",
+  "httpx",
+  "celery[redis]",
+  "cryptography",
+    "pypdf>=6",
+    "python-multipart>=0.0.20",
+    "pypdfium2>=4",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio>=0.26", "testcontainers[postgres]", "import-linter", "ruff"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+
+[tool.importlinter]
+root_package = "app"
+include_external_packages = true  # needed to forbid sqlalchemy below
+
+[[tool.importlinter.contracts]]
+name = "Modules are independent"
+type = "independence"
+modules = ["app.modules.text_quality", "app.modules.llm_config", "app.modules.documents"]
+ignore_imports = [
+  "app.shared.deps -> app.modules.documents.ports",
+  "app.shared.deps -> app.modules.text_quality.models",
+  "app.shared.deps -> app.modules.text_quality.repository",
+  "app.shared.resources -> app.modules.documents.adapters.pdf_inspector",
+  "app.shared.deps -> app.modules.llm_config.repository",
+  "app.shared.deps -> app.modules.llm_config.ports",
+  "app.shared.resources -> app.modules.llm_config.adapters.openai_http",
+  "app.shared.resources -> app.modules.documents.adapters.openai_ocr",
+  "app.shared.resources -> app.modules.documents.adapters.page_renderer",
+  "app.shared.deps -> app.modules.documents.repository",
+  "app.shared.deps -> app.modules.llm_config.credentials",
+  "app.shared.deps -> app.modules.llm_config.crypto",
+]
+
+[[tool.importlinter.contracts]]
+name = "Shared does not depend on modules (except resources wiring)"
+type = "forbidden"
+source_modules = ["app.shared.config", "app.shared.db", "app.shared.errors", "app.shared.auth"]
+forbidden_modules = ["app.modules"]
+
+[[tool.importlinter.contracts]]
+name = "Only repositories and models touch SQLAlchemy"
+type = "forbidden"
+source_modules = ["app.modules"]
+forbidden_modules = ["sqlalchemy"]
+allow_indirect_imports = true  # slices may import repository/models/shared.deps, just not sqlalchemy itself
+ignore_imports = [
+  "app.modules.*.repository -> sqlalchemy",
+  "app.modules.*.repository.* -> sqlalchemy",
+  "app.modules.*.models -> sqlalchemy",
+]
+unmatched_ignore_imports_alerting = "none"  # a fresh project or module has nothing to match yet
+
